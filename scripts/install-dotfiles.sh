@@ -7,6 +7,7 @@ TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="$HOME/.dotfiles-backups/$TIMESTAMP"
 INSTALL_PACKAGES=1
 DRY_RUN=0
+FORCE_LINK=0
 
 packages=(
   driftwm
@@ -28,6 +29,7 @@ Usage: $(basename "$0") [options]
 Options:
   --no-packages   Skip pacman package installation
   --dry-run       Print planned actions without changing files
+  --force-link     Remove destination before symlink (no backup)
   -h, --help      Show this help message
 USAGE
 }
@@ -61,15 +63,24 @@ backup_and_link() {
     exit 1
   fi
 
-  if [[ -L "$dst" && "$(readlink -f "$dst")" == "$(readlink -f "$src")" ]]; then
-    log "Already linked: $dst -> $src"
-    return 0
+  if [[ -L "$dst" ]]; then
+    local link_target=""
+    link_target="$(readlink "$dst" 2>/dev/null || true)"
+    if [[ "$link_target" == "$src" ]]; then
+      log "Already linked: $dst -> $src"
+      return 0
+    fi
   fi
 
   if [[ -e "$dst" || -L "$dst" ]]; then
-    log "Backing up $dst"
-    run mkdir -p "$BACKUP_DIR/$(dirname "${dst#$HOME/}")"
-    run mv "$dst" "$BACKUP_DIR/${dst#$HOME/}"
+    if (( FORCE_LINK )); then
+      log "Removing existing path (force): $dst"
+      run rm -rf "$dst"
+    else
+      log "Backing up $dst"
+      run mkdir -p "$BACKUP_DIR/$(dirname "${dst#$HOME/}")"
+      run mv "$dst" "$BACKUP_DIR/${dst#$HOME/}"
+    fi
   fi
 
   run mkdir -p "$(dirname "$dst")"
@@ -81,6 +92,7 @@ for arg in "$@"; do
   case "$arg" in
     --no-packages) INSTALL_PACKAGES=0 ;;
     --dry-run) DRY_RUN=1 ;;
+    --force-link) FORCE_LINK=1 ;;
     -h|--help)
       usage
       exit 0
@@ -104,7 +116,7 @@ if (( INSTALL_PACKAGES )); then
     exit 1
   fi
   log "Installing packages for CachyOS (pacman)..."
-  run sudo pacman -S --needed "${packages[@]}"
+  run sudo pacman -Syu --needed "${packages[@]}"
 else
   log "Skipping package installation (--no-packages)"
 fi

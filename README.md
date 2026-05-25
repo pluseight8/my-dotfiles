@@ -23,6 +23,9 @@ cd /path/to/my-dotfiles
 
 # Не ставить пакеты, только разложить конфиги
 ./scripts/install-dotfiles.sh --no-packages
+
+# Если ругается на конфликты существующих путей в ~/.config
+./scripts/install-dotfiles.sh --no-packages --force-link
 ```
 
 Скрипт:
