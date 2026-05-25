@@ -1,0 +1,9 @@
+{
+  "positionX": "right",
+  "positionY": "top",
+  "layer": "overlay",
+  "control-center-width": 420,
+  "notification-window-width": 380,
+  "timeout": 8,
+  "fit-to-screen": true
+}
