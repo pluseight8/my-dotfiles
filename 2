@@ -1,0 +1,74 @@
+Обработка заняла 41s
+
+Тут мой косяк: в актуальном репозитории нет patch/acpi-override/install.sh. ACPI-патч устанавливается самим apply_patch.sh, а не отдельным installer'ом.
+
+Но в твоём случае я бы не запускал весь apply_patch.sh прямо сейчас, потому что он ещё добавит i8042.dumbkbd=1, который на твоём ядре 7.2+ уже не нужен. Проще повторить тот рабочий способ, которым мы уже подняли твой тачпад и тачскрин.
+
+Из текущей папки выполни:
+
+cd /opt/honor-magicbook-linux
+
+sudo install -Dm0644 \
+  patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml \
+  /usr/lib/firmware/acpi/SSDT27_TPD0.aml
+
+sudo install -Dm0755 \
+  patch/acpi-override/acpi_override.install \
+  /etc/initcpio/install/acpi_override
+
+Теперь добавь hook:
+
+sudo sed -i 's/\bautodetect\b/autodetect acpi_override/' /etc/mkinitcpio.conf
+
+Проверь:
+
+grep '^HOOKS=' /etc/mkinitcpio.conf
+
+Должно быть примерно:
+
+HOOKS=(base systemd autodetect acpi_override microcode kms modconf block keyboard sd-vconsole plymouth filesystems)
+
+Если acpi_override есть — пересобирай:
+
+sudo limine-mkinitcpio
+
+И:
+
+sudo reboot
+
+После загрузки проверь:
+
+sudo journalctl -k -b | grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL'
+
+Нужно увидеть:
+
+Table Upgrade: override [SSDT- HONOR-I2C_DEVT]
+
+и не должно быть ошибки:
+
+AE_AML_INTERNAL, (SSDT:I2C_DEVT)
+
+Потом убедись, что появились оба устройства:
+
+ls /sys/bus/hid/devices | grep -Ei '2808:5662|27c6:0f9a'
+
+Если там снова есть:
+
+27C6:0F9A
+2808:5662
+
+значит базовый фикс на свежем Omarchy готов.
+
+И только после этого ставим второй этап:
+
+cd /opt/honor-magicbook-linux
+
+sudo bash patch/psr-band/install.sh
+sudo bash patch/cdclk-ptl/install.sh
+sudo bash patch/edp-dsc/install.sh
+sudo bash patch/micmute/install.sh
+sudo bash patch/touchpad-edge/install.sh
+sudo bash patch/fingerprint/install.sh
+sudo bash patch/auto-rebuild/install.sh
+
+Но не запускай этот второй блок прямо сейчас. Сначала ACPI → reboot → проверка. Если после ребута тачскрин и тачпад ожили, пойдём дальше уже без повторения прошлой возни.
