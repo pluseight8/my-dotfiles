@@ -1,0 +1,79 @@
+Обработка заняла 22s
+
+Ага, вот причина. ACPI override не попал в initramfs Omarchy. На скрине всё ещё грузится стоковый I2C_DEVT и падает с AE_AML_INTERNAL.
+
+Мы редактировали /etc/mkinitcpio.conf, но Omarchy задаёт свой HOOKS= в /etc/mkinitcpio.conf.d/omarchy_hooks.conf, и он перекрывает основной файл. На Omarchy это надо делать через отдельный drop-in, который загрузится после омарчевского конфига. 
+
+Сделай так:
+
+sudo tee /etc/mkinitcpio.conf.d/zz-honor-acpi.conf >/dev/null <<'EOF'
+# HONOR ZQC-P ACPI override.
+# Keep this separate from Omarchy's package-owned omarchy_hooks.conf.
+
+if [[ ! " ${HOOKS[*]} " =~ " acpi_override " ]]; then
+    _honor_hooks=()
+
+    for _hook in "${HOOKS[@]}"; do
+        _honor_hooks+=("$_hook")
+
+        if [[ "$_hook" == "autodetect" ]]; then
+            _honor_hooks+=(acpi_override)
+        fi
+    done
+
+    HOOKS=("${_honor_hooks[@]}")
+    unset _honor_hooks _hook
+fi
+EOF
+
+Убедимся, что сами файлы патча на месте:
+
+sudo ls -l \
+  /usr/lib/firmware/acpi/SSDT27_TPD0.aml \
+  /etc/initcpio/install/acpi_override
+
+Теперь можно посмотреть итоговый HOOKS, который реально увидит mkinitcpio:
+
+sudo bash -c '
+source /etc/mkinitcpio.conf
+for f in /etc/mkinitcpio.conf.d/*.conf; do
+    source "$f"
+done
+printf "%s\n" "${HOOKS[*]}"
+'
+
+Там обязательно должно быть:
+
+... autodetect acpi_override microcode ...
+
+или просто acpi_override где-то после autodetect.
+
+Теперь важно именно для Omarchy:
+
+sudo limine-mkinitcpio
+
+Не mkinitcpio -P: Omarchy сейчас использует Limine + UKI, и limine-mkinitcpio — правильный rebuild-путь. 
+
+После успешной сборки:
+
+sudo reboot
+
+И после ребута:
+
+sudo journalctl -k -b | grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL'
+
+Теперь правильный результат должен содержать:
+
+ACPI: Table Upgrade: override [SSDT- HONOR-I2C_DEVT]
+
+и не содержать:
+
+AE_AML_INTERNAL, (SSDT:I2C_DEVT) while loading table
+
+После этого:
+
+ls /sys/bus/hid/devices | grep -Ei '2808:5662|27c6:0f9a'
+
+должен снова показать и FTSC1000, и TOPS0102.
+
+Короче, сам патч у нас правильный — мы это уже доказали на CachyOS. Здесь нас подловил именно Omarchy со своим /etc/mkinitcpio.conf.d/omarchy_hooks.conf. Этот zz-honor-acpi.conf заодно лучше нашего прошлого способа: он не правит файл Omarchy и должен переживать его обновления.
