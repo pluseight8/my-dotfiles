@@ -1,0 +1,31 @@
+Всё, собралось успешно. За 1m 16s он собрал и установил patched xe.ko, пересобрал initramfs и обновил Limine. Строка removing the source tree — тоже норм, он просто удалил временные исходники после сборки.
+
+Теперь просто:
+
+sudo reboot
+
+После загрузки проверь экран:
+
+sudo grep -E 'pipe src=' /sys/kernel/debug/dri/*/i915_display_info
+
+Хотим увидеть:
+
+dither=no, bpp=30
+
+И DSC:
+
+sudo grep DSC_Enabled /sys/kernel/debug/dri/*/eDP-1/i915_dsc_fec_support
+
+Хотим:
+
+DSC_Enabled: yes
+
+Ещё можно убедиться, что реально грузится наш модуль:
+
+modinfo xe | head
+
+Путь должен вести в что-то вроде:
+
+/usr/lib/modules/7.2.7-1-cachyos/updates/xe.ko...
+
+Если после ребута эти проверки проходят — экранная часть у нас готова. Потом остаются micmute, свайп яркости, fingerprint и auto-rebuild.
