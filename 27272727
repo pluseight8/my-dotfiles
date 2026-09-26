@@ -1,0 +1,191 @@
+Обработка заняла 46s
+
+Да, возвращаемся на Omarchy с нуля, но теперь уже без всей прошлой хуйни. Вот самый короткий рабочий путь именно для твоего HONOR ZQC-P / M1230.
+
+1. Чистая установка Omarchy
+
+Ставишь Omarchy с ISO обычным способом. Secure Boot/TPM для установки отключены; full-disk install сотрёт диск и по умолчанию включит LUKS. 
+
+После первого входа:
+
+omarchy-update
+
+Потом зависимости:
+
+sudo pacman -S --needed \
+  git base-devel clang bpf udev-hid-bpf usbutils \
+  meson ninja pkgconf glib2-devel \
+  libgusb nss libgudev gobject-introspection \
+  cairo pixman polkit fprintd libfprint
+
+2. Репозиторий + твой M1230
+
+sudo git clone \
+  https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010.git \
+  /opt/honor-magicbook-linux
+
+sudo chown -R "$USER:$(id -gn)" /opt/honor-magicbook-linux
+cd /opt/honor-magicbook-linux
+
+Добавляем профиль:
+
+cat >> devices/zqc-p.conf <<'EOF'
+
+[board M1230]
+status=probed
+origin=local M1230 hardware observation
+platform=pantherlake
+dgpu=none
+dmi_board=ZQC-P-PCB
+dmi_sku=C233
+touchscreen_hid=2808:5662
+touchpad_hid=27c6:0f9a
+audio_ssid=1ee7:209d
+fingerprint_usb=1c7a:05aa
+camera_usb=30c9:012c
+panel=oled
+backlight_max=704
+fixes=acpi-override psr-band cdclk-ptl edp-dsc micmute touchpad-edge fingerprint auto-rebuild
+EOF
+
+И рецепты:
+
+mkdir -p \
+  patch/acpi-override/zqc-p/M1230 \
+  patch/psr-band/zqc-p/M1230 \
+  patch/cdclk-ptl/zqc-p/M1230 \
+  patch/edp-dsc/zqc-p/M1230 \
+  patch/micmute/zqc-p/M1230 \
+  patch/touchpad-edge/zqc-p/M1230 \
+  patch/fingerprint/zqc-p/M1230 \
+  patch/auto-rebuild/zqc-p/M1230
+
+echo 'same_as=zqc-p/M1010' > patch/acpi-override/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1050' > patch/psr-band/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1050' > patch/cdclk-ptl/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1050' > patch/edp-dsc/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1010' > patch/micmute/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1010' > patch/touchpad-edge/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1050' > patch/fingerprint/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1050' > patch/auto-rebuild/zqc-p/M1230/recipe.conf
+
+3. Главный фикс — тачпад + touchscreen
+
+sudo install -Dm0644 \
+  patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml \
+  /usr/lib/firmware/acpi/SSDT27_TPD0.aml
+
+sudo install -Dm0755 \
+  patch/acpi-override/acpi_override.install \
+  /etc/initcpio/install/acpi_override
+
+На Omarchy не редактируем просто /etc/mkinitcpio.conf — его HOOKS перекрываются Omarchy drop-in'ом. Создаём свой:
+
+sudo tee /etc/mkinitcpio.conf.d/zz-honor-acpi.conf >/dev/null <<'EOF'
+if [[ ! " ${HOOKS[*]} " =~ " acpi_override " ]]; then
+    _new=()
+    for h in "${HOOKS[@]}"; do
+        _new+=("$h")
+        [[ "$h" == "autodetect" ]] && _new+=(acpi_override)
+    done
+    HOOKS=("${_new[@]}")
+    unset _new h
+fi
+EOF
+
+Omarchy действительно поставляет собственные mkinitcpio drop-ins, поэтому отдельный файл здесь правильнее правки package-owned config. 
+
+Пересобираем именно Omarchy-способом:
+
+sudo limine-mkinitcpio
+sudo reboot
+
+После ребута:
+
+sudo journalctl -k -b | grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL'
+
+Нужно увидеть Table Upgrade: override, а AE_AML_INTERNAL исчезнуть.
+
+Проверка железа:
+
+ls /sys/bus/hid/devices | grep -Ei '27c6:0f9a|2808:5662'
+
+Если оба есть — основа готова.
+
+4. Mic-mute + яркость с тачпада
+
+cd /opt/honor-magicbook-linux
+
+sudo bash patch/micmute/install.sh
+sudo bash patch/touchpad-edge/install.sh
+
+После этого:
+
+левый край тачпада  → яркость
+правый край         → громкость
+Fn mic mute         → нормально работает
+
+5. Нормальный OLED: PSR + DSC/10-bit
+
+У тебя по нашему дампу экран реально работал в 6 bpc с dithering, поэтому:
+
+sudo bash patch/psr-band/install.sh
+sudo bash patch/cdclk-ptl/install.sh
+sudo bash patch/edp-dsc/install.sh
+
+Если cdclk скажет, что уже есть upstream — просто отлично.
+
+Потом:
+
+sudo limine-mkinitcpio
+sudo reboot
+
+6. Fingerprint
+
+Сначала:
+
+lsusb | grep 1c7a:05aa
+
+Если ничего нет — сделай полное выключение, подожди секунд 15 и включи снова.
+
+Наш старый Meson fix:
+
+cd /opt/honor-magicbook-linux
+
+sed -i \
+  's/-Dintrospection=false/-Dintrospection=true/' \
+  patch/fingerprint/install.sh
+
+Установка:
+
+sudo bash patch/fingerprint/install.sh
+
+После неё не надо вручную ковырять PAM. В Omarchy:
+
+Super + Space → Setup → Security → Fingerprint
+
+Это официальный Omarchy flow: он регистрирует палец и подключает fingerprint к lock screen, sudo и системной авторизации. 
+
+7. Защита от обновлений
+
+sudo bash patch/auto-rebuild/install.sh
+
+Проверка:
+
+cat /etc/honor-autorebuild.conf
+
+Нужно:
+
+REPO=/opt/honor-magicbook-linux
+
+Финальный чек
+
+sudo udev-hid-bpf list-loaded
+
+sudo journalctl -k -b | grep -iE 'AE_AML_INTERNAL|DSP panic|FIFO underrun'
+
+И руками: touchscreen, тачпад, яркость слева, громкость справа, mic-mute, микрофон, fingerprint, 120 Hz, Night Light, Wi-Fi/Bluetooth, звук и suspend/resume.
+
+Не запускай весь apply_patch.sh, не используй FORCE_ACPI=1 и пока не ставь fan/battery/oled-backlight/hotkeys/headset-mic. Для нашего M1230 мы их отдельно не подтвердили.
+
+Вот этот гайд уже учитывает главную ловушку, на которой мы обосрались в прошлый раз: Omarchy собственным omarchy_hooks.conf перекрывает обычный mkinitcpio.conf, поэтому ACPI надо подключать отдельным drop-in и собирать через limine-mkinitcpio.
