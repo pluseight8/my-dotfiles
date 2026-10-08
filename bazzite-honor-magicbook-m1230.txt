@@ -499,7 +499,7 @@ https://raw.githubusercontent.com/gregkh/linux/v7.2.8/drivers/hid/bpf/progs/hid_
 
 После окончания:
 
-sudo udev-hid-bpf list-loaded
+sudo udev-hid-bpf list-devices
 
 Должен быть:
 
@@ -529,7 +529,7 @@ sudo ALLOW_UNVERIFIED=1 bash patch/touchpad-edge/install.sh
 
 Проверка:
 
-sudo udev-hid-bpf list-loaded | grep honor_tops0102
+sudo udev-hid-bpf list-devices | grep honor_tops0102
 
 Теперь попробуй провести пальцем по левому краю тачпада.
 
@@ -811,7 +811,7 @@ else
 fi
 
 if command -v udev-hid-bpf >/dev/null 2>&1; then
-    BPF="$(udev-hid-bpf list-loaded 2>/dev/null || true)"
+    BPF="$(udev-hid-bpf list-devices 2>/dev/null || true)"
 
     grep -qi 'honor_ftsc1000_micmute' <<<"$BPF" \
         && ok "micmute HID-BPF loaded" \
@@ -1029,7 +1029,7 @@ sudo grep '^PSR mode' "$PSR_FILE"
 
 BPF:
 
-sudo udev-hid-bpf list-loaded
+sudo udev-hid-bpf list-devices
 
 Должны быть:
 - honor_ftsc1000_micmute;
