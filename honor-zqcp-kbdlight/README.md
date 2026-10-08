@@ -43,3 +43,29 @@ make the automatic rebuild fail after a future kernel update.
 
 Other temporary build dependencies used for HID-BPF or libfprint are not needed
 by this module at runtime.
+
+## Verified on M1230
+
+Direct LED-class control is confirmed to change the physical keyboard
+backlight:
+
+```bash
+echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+echo 1 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+```
+
+If direct sysfs control works but the KDE slider does not, restart the
+userspace power stack so it can rediscover the newly-created LED:
+
+```bash
+sudo systemctl restart upower.service
+systemctl --user restart plasma-powerdevil.service
+```
+
+If KDE still uses the wrong backend, inspect:
+
+```bash
+busctl tree org.freedesktop.UPower | grep -i KbdBacklight
+ls -1 /sys/class/leds
+```
