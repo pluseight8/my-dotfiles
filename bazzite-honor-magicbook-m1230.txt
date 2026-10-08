@@ -1578,6 +1578,65 @@ verification/signature/key rejection, причина подтверждена: �
 До подтверждения ничего в BIOS не меняем.
 
 ======================================================================
+ДИАГНОСТИКА: SECURE BOOT ВЫКЛЮЧЕН, НО SYSTEMD INSMOD ДАЁТ EPERM
+======================================================================
+
+Если предыдущая проверка показывает:
+- SecureBoot disabled;
+- lockdown = [none];
+- signer у honor_zqcp_kbdlight.ko пустой;
+- kernel разрешает другие неподписанные модули с tainting;
+
+то гипотеза про Secure Boot НЕ подтверждена.
+
+Так как первый install-bazzite.sh успешно загружал тот же .ko из root shell,
+а honor-zqcp-kbdlight.service позже получает "Operation not permitted",
+проверяем две вещи:
+1) не отключена ли загрузка модулей глобально;
+2) не блокирует ли загрузку SELinux/systemd context при попытке читать .ko из
+   /var/lib/honor.
+
+Сначала:
+
+cat /proc/sys/kernel/modules_disabled
+getenforce
+
+Потом контексты файлов:
+
+ls -lZ /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko
+ls -lZ /usr/local/lib/honor/kbdlight-build-load.sh
+ls -lZ /etc/systemd/system/honor-zqcp-kbdlight.service
+
+Проверяем SELinux AVC:
+
+sudo ausearch -m AVC,USER_AVC -ts boot 2>/dev/null \
+  | grep -Ei 'kbdlight|honor_zqcp|insmod|module|var/lib/honor' \
+  | tail -n 100 || true
+
+sudo journalctl -k -b --no-pager \
+  | grep -Ei 'avc|selinux|denied|kbdlight|honor_zqcp' \
+  | tail -n 100 || true
+
+И главный контрольный тест: грузим ТОТ ЖЕ .ko вручную из обычного sudo shell и
+сразу читаем последние kernel messages:
+
+KO="/var/lib/honor/kbdlight/$(uname -r)/honor_zqcp_kbdlight.ko"
+sudo insmod "$KO"; RC=$?
+echo "insmod rc=$RC"
+lsmod | grep honor_zqcp || true
+ls -1 /sys/class/leds | grep -E 'honor|huawei|kbd' || true
+sudo dmesg | tail -n 100
+
+Интерпретация:
+- modules_disabled = 1 -> kernel уже глобально запретил новые module loads;
+- manual sudo insmod WORKS, а systemd service FAILS -> почти наверняка
+  SELinux/unit-context/path-label issue;
+- manual sudo insmod тоже FAILS -> точную причину берём из последних dmesg;
+- после успешного manual insmod должен снова появиться honor::kbd_backlight.
+
+НЕ отключать SELinux и НЕ менять Secure Boot ради теста.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
