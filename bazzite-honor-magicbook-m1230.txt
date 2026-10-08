@@ -2145,7 +2145,7 @@ sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
 НЕ делаем setenforce 0 и НЕ выключаем SELinux.
 
 ======================================================================
-ПОДТВЕРЖДЕНО: DSC SERVICE ПАДАЕТ НЕ ИЗ-ЗА SELINUX, А ПОТОМУ ЧТО DEBUGFS ЕЩЁ НЕ ГОТОВ
+УСТАРЕЛО: ГИПОТЕЗА ПРО ПОЗДНИЙ DEBUGFS (НЕВЕРНО)
 ======================================================================
 
 Journal показал точную причину:
@@ -2307,6 +2307,48 @@ sudo journalctl -k -b --no-pager \
   ищем внешний systemd timeout/kill;
 - AVC появляется после systemd-run probe -> SELinux всё-таки подтверждён;
 - AVC нет и systemd-run видит файл -> SELinux можно окончательно исключить.
+
+======================================================================
+ПОДТВЕРЖДЕНО: HONOR-FORCE-DSC.SERVICE БЛОКИРУЕТ SELINUX
+======================================================================
+
+Причина подтверждена точным AVC.
+
+Transient systemd service ВИДИТ:
+  /sys/kernel/debug/dri/.../eDP-1/i915_dsc_fec_support
+
+Но SELinux запрещает запись:
+
+  avc: denied { write }
+  comm="force-dsc.sh"
+  name="i915_dsc_fec_support"
+  scontext=system_u:system_r:init_t:s0
+  tcontext=system_u:object_r:debugfs_t:s0
+  tclass=file
+
+Ручной sudo shell работает, потому что запускается в другом SELinux context.
+
+ВАЖНО:
+предыдущая гипотеза "debugfs появляется слишком поздно" была неверной.
+Helper писал "not found", потому что его условие проверяло не только наличие
+файла, но и право записи (-w). SELinux делал файл невritable для systemd/init_t.
+
+Пока НЕ:
+- отключаем SELinux;
+- делаем setenforce 0;
+- добавляем широкий allow init_t -> debugfs_t;
+- генерируем audit2allow из всего журнала.
+
+Текущий безопасный статус:
+- DSC helper вручную работает;
+- DSC_Enabled=yes;
+- Force_DSC_Enable=yes;
+- bpp=30;
+- dither=no;
+- проблема только в автоматическом запуске из systemd.
+
+Следующий фикс должен быть узким SELinux-решением только для DSC helper/service,
+а не глобальным разрешением systemd писать в debugfs.
 
 ======================================================================
 ОЖИДАЕМЫЙ ИТОГ
