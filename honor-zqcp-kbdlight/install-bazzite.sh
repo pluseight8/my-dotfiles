@@ -103,9 +103,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable honor-zqcp-kbdlight.service
-
-/usr/local/lib/honor/kbdlight-build-load.sh
+systemctl enable --now honor-zqcp-kbdlight.service
 
 systemctl try-restart upower.service >/dev/null 2>&1 || true
 
