@@ -1409,6 +1409,26 @@ echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
 echo 1 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
 echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
 
+На M1230 подтверждено: прямые записи 0/1/2 в
+/sys/class/leds/honor::kbd_backlight/brightness ФИЗИЧЕСКИ меняют подсветку
+клавиатуры. Значит EC mapping и наш honor_zqcp_kbdlight driver работают.
+
+Если после установки прямой sysfs test работает, а KDE slider всё ещё ничего
+не меняет, проблема уже не в EC driver, а в том, что UPower/PowerDevil ещё
+держат старый backend.
+
+Перезапусти их:
+
+sudo systemctl restart upower.service
+systemctl --user restart plasma-powerdevil.service
+
+После этого снова проверь ползунок KDE.
+
+Если slider всё ещё мёртвый, собери диагностику:
+
+busctl tree org.freedesktop.UPower | grep -i KbdBacklight
+ls -1 /sys/class/leds
+
 Если эти три значения реально меняют подсветку, KDE/UPower можно перезапустить:
 
 sudo systemctl restart upower.service
