@@ -1,0 +1,571 @@
+BAZZITE — HONOR MAGICBOOK PRO 14 2026 AI (ZQC-P / M1230)
+Полный гайд по фиксам
+Обновлено: 2026-10-08
+
+ЦЕЛЬ
+Поднять на Bazzite:
+- ACPI override -> touchscreen + touchpad
+- PSR1 -> убрать артефакты PSR2
+- HID-BPF micmute -> убрать фантомное mute/unmute
+- HID-BPF touchpad edge -> левый край тачпада = яркость
+- EgisTec 1c7a:05aa fingerprint
+- DSC -> 10-bit / bpp=30 / dither=no
+- CDCLK отдельно не патчим: нужный PTL fix уже есть в текущем OGC kernel
+- SOF audio отдельно не патчим: нужное обновление уже есть в текущем OGC kernel
+- i8042.dumbkbd=1 НЕ добавляем на Linux 7.2+
+
+ВАЖНО
+Не запускать apply_patch.sh целиком на Bazzite.
+M1230 отсутствует в upstream-профиле репозитория, а часть Tier-B фиксов содержит значения, измеренные на других ревизиях.
+
+============================================================
+1. КЛОНИРУЕМ HONOR-РЕПОЗИТОРИЙ
+============================================================
+
+cd ~
+git clone https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010.git honor-magicbook-linux
+cd ~/honor-magicbook-linux
+
+Проверяем модель:
+
+cat /sys/class/dmi/id/product_name
+cat /sys/class/dmi/id/board_version
+
+Ожидается:
+
+ZQC-P
+M1230
+
+Добавляем локальный профиль M1230:
+
+grep -q '^\[board M1230\]$' devices/zqc-p.conf || cat >> devices/zqc-p.conf <<'EOF'
+
+[board M1230]
+status=probed
+origin=local M1230 hardware observation
+platform=pantherlake
+dgpu=none
+cpu=Intel(R) Core(TM) Ultra X7 358H
+dmi_board=ZQC-P-PCB
+dmi_sku=C233
+touchscreen_hid=2808:5662
+touchpad_hid=27c6:0f9a
+audio_ssid=1ee7:209d
+fingerprint_usb=1c7a:05aa
+camera_usb=30c9:012c
+panel=oled
+backlight_max=704
+fixes=acpi-override psr-band micmute touchpad-edge fingerprint
+EOF
+
+Создаём локальные recipe для M1230:
+
+mkdir -p \
+  patch/acpi-override/zqc-p/M1230 \
+  patch/psr-band/zqc-p/M1230 \
+  patch/micmute/zqc-p/M1230 \
+  patch/touchpad-edge/zqc-p/M1230 \
+  patch/fingerprint/zqc-p/M1230
+
+echo 'same_as=zqc-p/M1010' > patch/acpi-override/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1010' > patch/psr-band/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1010' > patch/micmute/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1010' > patch/touchpad-edge/zqc-p/M1230/recipe.conf
+echo 'same_as=zqc-p/M1050' > patch/fingerprint/zqc-p/M1230/recipe.conf
+
+Почему:
+- M1230 touchscreen = 2808:5662, как M1010
+- M1230 touchpad = 27c6:0f9a, как M1010
+- M1230 fingerprint = 1c7a:05aa, как M1050
+- ACPI I2C_DEVT раньше уже совпадала по хэшу с референсом M1010, но ниже всё равно обязательно проверяем повторно
+
+============================================================
+2. СИСТЕМНЫЕ ЗАВИСИМОСТИ BAZZITE
+============================================================
+
+Системные RPM layer'им через rpm-ostree.
+
+PERSIST=(
+  udev-hid-bpf
+  fprintd
+  fprintd-pam
+)
+
+TEMP=(
+  clang
+  bpftool
+  gcc
+  make
+  git
+  meson
+  ninja-build
+  pkgconf-pkg-config
+  glib2-devel
+  libgusb-devel
+  nss-devel
+  libgudev-devel
+  gobject-introspection-devel
+  cairo-devel
+  pixman-devel
+  polkit-devel
+  usbutils
+)
+
+MISSING=()
+TEMP_MISSING=()
+
+for p in "${PERSIST[@]}"; do
+    rpm -q "$p" >/dev/null 2>&1 || MISSING+=("$p")
+done
+
+for p in "${TEMP[@]}"; do
+    if ! rpm -q "$p" >/dev/null 2>&1; then
+        MISSING+=("$p")
+        TEMP_MISSING+=("$p")
+    fi
+done
+
+printf '%s\n' "${TEMP_MISSING[@]}" > "$HOME/.honor-temp-layered"
+
+if (( ${#MISSING[@]} )); then
+    sudo rpm-ostree install --idempotent "${MISSING[@]}"
+else
+    echo "Все необходимые пакеты уже есть"
+fi
+
+Пока НЕ перезагружаться.
+
+============================================================
+3. ACPI OVERRIDE — TOUCHPAD + TOUCHSCREEN
+============================================================
+
+cd ~/honor-magicbook-linux
+
+Обязательно сравниваем живую I2C_DEVT с заводским референсом:
+
+LIVE=""
+
+for f in /sys/firmware/acpi/tables/SSDT*; do
+    [[ -r "$f" ]] || continue
+
+    OEM=$(sudo dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\0 ')
+
+    if [[ "$OEM" == "I2C_DEVT" ]]; then
+        LIVE="$f"
+        break
+    fi
+done
+
+echo "Live table: $LIVE"
+
+LIVE_MD5=$(sudo md5sum "$LIVE" | awk '{print $1}')
+REF_MD5=$(md5sum dump/acpi/zqc-p/SSDT27_orig.aml | awk '{print $1}')
+
+echo "LIVE : $LIVE_MD5"
+echo "REPO : $REF_MD5"
+
+if [[ "$LIVE_MD5" != "$REF_MD5" ]]; then
+    echo "STOP: ACPI table отличается. Патч НЕ устанавливаем."
+    exit 1
+fi
+
+echo "ACPI таблица совпадает — можно ставить."
+
+Устанавливаем AML в /etc:
+
+sudo install -d -m755 /etc/dracut.conf.d/honor-acpi
+
+sudo install -m644 \
+  patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml \
+  /etc/dracut.conf.d/honor-acpi/SSDT27_TPD0.aml
+
+Создаём dracut config:
+
+sudo tee /etc/dracut.conf.d/90-honor-acpi.conf >/dev/null <<'EOF'
+acpi_override="yes"
+acpi_table_dir="/etc/dracut.conf.d/honor-acpi"
+EOF
+
+============================================================
+4. PSR2 -> PSR1
+============================================================
+
+Нужен параметр:
+
+xe.enable_psr=1
+
+На Bazzite меняем kernel args через rpm-ostree.
+
+Сначала смотрим:
+
+rpm-ostree kargs
+
+Если уже есть xe.enable_psr с другим значением, удаляем именно его, например:
+
+sudo rpm-ostree kargs --delete="xe.enable_psr=2"
+
+или:
+
+sudo rpm-ostree kargs --delete="xe.enable_psr=0"
+
+Потом добавляем:
+
+rpm-ostree kargs | grep -qw 'xe.enable_psr=1' || \
+  sudo rpm-ostree kargs --append="xe.enable_psr=1"
+
+НЕ добавлять:
+
+i8042.dumbkbd=1
+
+На Linux 7.2+ нужный atkbd quirk уже upstream.
+
+============================================================
+5. ВКЛЮЧАЕМ ЛОКАЛЬНЫЙ INITRAMFS BAZZITE
+============================================================
+
+sudo rpm-ostree initramfs --enable
+
+Проверяем:
+
+rpm-ostree status
+
+Теперь reboot:
+
+systemctl reboot
+
+============================================================
+6. ПОСЛЕ ПЕРВОГО REBOOT — ПРОВЕРКА ACPI
+============================================================
+
+sudo journalctl -k -b | grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL|locked down'
+
+Нужно увидеть что-то вроде:
+
+Table Upgrade: override [SSDT- HONOR-I2C_DEVT]
+
+Не должно быть:
+
+AE_AML_INTERNAL
+
+и:
+
+kernel is locked down, ignoring table override
+
+Если есть "kernel is locked down, ignoring table override":
+- Secure Boot / lockdown блокирует override
+- отключить Secure Boot в BIOS
+- загрузиться снова
+
+Проверка HID устройств:
+
+ls /sys/bus/hid/devices/ | grep -iE '2808:5662|27C6:0F9A'
+
+Должны быть touchscreen и touchpad.
+
+============================================================
+7. MICMUTE HID-BPF
+============================================================
+
+cd ~/honor-magicbook-linux
+
+sudo ALLOW_UNVERIFIED=1 \
+  bash patch/micmute/install.sh
+
+Проверка phantom micmute:
+
+grep -l UNKNOWN /sys/class/input/input*/name | xargs -r grep -H 2808
+
+Команда должна ничего не вывести.
+
+Проверка BPF:
+
+sudo udev-hid-bpf list-loaded
+
+Объект CO-RE, поэтому после каждого kernel update его пересобирать не надо.
+
+============================================================
+8. ЛЕВЫЙ КРАЙ ТАЧПАДА -> ЯРКОСТЬ
+============================================================
+
+cd ~/honor-magicbook-linux
+
+sudo ALLOW_UNVERIFIED=1 \
+  bash patch/touchpad-edge/install.sh
+
+Проверка:
+
+sudo udev-hid-bpf list-loaded
+
+После этого:
+- левый край touchpad -> brightness
+- правый край -> volume
+
+Правый край уже работает через EC и отдельно не патчится.
+
+============================================================
+9. FINGERPRINT — EGISTEC 1c7a:05aa
+============================================================
+
+Проверяем устройство:
+
+lsusb -d 1c7a:05aa
+
+Должен быть EgisTec / LighTuning.
+
+Ставим:
+
+cd ~/honor-magicbook-linux
+
+sudo ALLOW_UNVERIFIED=1 \
+  bash patch/fingerprint/install.sh
+
+Для M1230 используется recipe M1050:
+- EgisTec ET171
+- 1c7a:05aa
+- libfprint feature/sdcp-v2
+- private prefix /opt/honor-libfprint-sdcp
+
+После успешной сборки:
+
+sudo restorecon -RF /opt/honor-libfprint-sdcp 2>/dev/null || true
+sudo ldconfig
+sudo systemctl restart fprintd
+
+Регистрируем палец:
+
+fprintd-enroll -f right-index-finger
+
+Проверяем:
+
+fprintd-verify
+
+Если работает:
+
+sudo authselect enable-feature with-fingerprint
+
+============================================================
+10. DSC -> 10-BIT / BPP=30 / DITHER=NO
+============================================================
+
+Смотрим текущий статус:
+
+sudo sh -c 'cat /sys/kernel/debug/dri/*/eDP-*/i915_dsc_fec_support'
+
+До фикса обычно:
+
+DSC_Enabled: no
+DSC_Sink_Support: yes
+Force_DSC_Enable: no
+
+В текущем OGC kernel есть writable i915_dsc_fec_support, поэтому xe.ko не пересобираем.
+
+Создаём helper:
+
+sudo install -d -m755 /usr/local/lib/honor
+
+sudo tee /usr/local/lib/honor/force-dsc.sh >/dev/null <<'EOF'
+#!/usr/bin/bash
+set -eu
+
+mountpoint -q /sys/kernel/debug || \
+    mount -t debugfs debugfs /sys/kernel/debug
+
+for _ in $(seq 1 200); do
+    for f in /sys/kernel/debug/dri/*/eDP-*/i915_dsc_fec_support; do
+        [[ -w "$f" ]] || continue
+        echo 1 > "$f"
+        exit 0
+    done
+    sleep 0.05
+done
+
+echo "HONOR: i915_dsc_fec_support not found" >&2
+exit 1
+EOF
+
+sudo chmod 755 /usr/local/lib/honor/force-dsc.sh
+sudo restorecon -F /usr/local/lib/honor/force-dsc.sh 2>/dev/null || true
+
+Создаём systemd service:
+
+sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
+[Unit]
+Description=Force DSC on HONOR internal eDP panel
+After=systemd-modules-load.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/honor/force-dsc.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable honor-force-dsc.service
+
+============================================================
+11. УДАЛЯЕМ ВРЕМЕННЫЕ BUILD-ПАКЕТЫ
+============================================================
+
+Смотрим список:
+
+cat ~/.honor-temp-layered
+
+Если не пуст:
+
+mapfile -t REMOVE < ~/.honor-temp-layered
+
+if (( ${#REMOVE[@]} )); then
+    sudo rpm-ostree uninstall "${REMOVE[@]}"
+fi
+
+Не удалять runtime-пакеты:
+- udev-hid-bpf
+- fprintd
+- fprintd-pam
+
+============================================================
+12. ФИНАЛЬНЫЙ REBOOT
+============================================================
+
+systemctl reboot
+
+============================================================
+13. ФИНАЛЬНАЯ ПРОВЕРКА
+============================================================
+
+ACPI:
+
+sudo journalctl -k -b | grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL'
+
+Нужно:
+- Table Upgrade: override
+- без AE_AML_INTERNAL
+
+PSR:
+
+cat /sys/module/xe/parameters/enable_psr
+
+Нужно:
+
+1
+
+И:
+
+sudo sh -c "grep '^PSR mode' /sys/kernel/debug/dri/*/eDP-*/i915_psr_status"
+
+Ожидается примерно:
+
+PSR mode: PSR1 enabled
+
+HID-BPF:
+
+sudo udev-hid-bpf list-loaded
+
+Должны быть оба объекта:
+- touchscreen micmute
+- touchpad edge
+
+Phantom micmute:
+
+grep -l UNKNOWN /sys/class/input/input*/name | xargs -r grep -H 2808
+
+Должно быть пусто.
+
+Fingerprint:
+
+fprintd-verify
+
+DSC:
+
+sudo sh -c 'cat /sys/kernel/debug/dri/*/eDP-*/i915_dsc_fec_support | grep -E "DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable"'
+
+Нужно:
+
+DSC_Enabled: yes
+DSC_Sink_Support: yes
+Force_DSC_Enable: yes
+
+Проверка глубины цвета:
+
+sudo sh -c "grep -m1 -E 'pipe src=.*bpp=' /sys/kernel/debug/dri/*/i915_display_info"
+
+Нужно:
+
+dither=no
+bpp=30
+
+Итог по экрану:
+- 3120x2080
+- 120 Hz
+- 10-bit
+- DSC
+- dither=no
+
+============================================================
+ЧТО СПЕЦИАЛЬНО НЕ СТАВИМ
+============================================================
+
+1. cdclk-ptl
+Не нужен: соответствующий PTL fix уже есть в текущем OGC kernel Bazzite.
+
+2. patch/edp-dsc/install.sh
+Не нужен: DSC форсим штатным writable debugfs интерфейсом драйвера, xe.ko не пересобираем.
+
+3. sof-audio
+Не нужен на текущем OGC: нужное обновление copier payload уже присутствует.
+
+4. i8042.dumbkbd=1
+Не нужен на Linux 7.2+ и отключает нормальный Caps Lock LED.
+
+5. oled-backlight
+Не ставить вслепую на M1230.
+Floor надо измерять именно на этой панели.
+
+6. fan
+Не ставить вслепую на M1230.
+EC offsets M1010/M1050 официально не подтверждены для M1230.
+
+7. battery
+Не ставить вслепую.
+Рабочие EC charge preset пары для M1230 надо сначала проверить.
+
+8. hotkeys / hotkey-actions
+Не копировать вслепую с M1010/M1050:
+camera USB у M1230 = 30c9:012c, а не 3277:00de.
+Сначала отдельно измерить коды кнопок.
+
+9. headset-mic
+Отдельный kernel-module quirk для SSID 1ee7:209d не ставим автоматически.
+Сначала реально проверить микрофон 3.5 mm гарнитуры.
+
+============================================================
+ОЖИДАЕМЫЙ РЕЗУЛЬТАТ
+============================================================
+
+После этого набора должны работать:
+- keyboard
+- touchscreen
+- touchpad
+- left edge brightness
+- right edge volume
+- mic mute без фантомных нажатий
+- fingerprint
+- Wi-Fi / Bluetooth
+- camera
+- speakers
+- internal microphone
+- 3120x2080 @ 120 Hz
+- PSR1
+- DSC
+- 10-bit
+- bpp=30
+- dither=no
+
+Без:
+- custom Bazzite image
+- самодельного xe.ko
+- пересборки ядра
