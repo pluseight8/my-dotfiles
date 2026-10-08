@@ -1755,6 +1755,75 @@ git clone --depth 1 https://github.com/pluseight8/my-dotfiles.git /tmp/my-dotfil
 sudo bash /tmp/my-dotfiles/honor-zqcp-kbdlight/install-bazzite.sh
 
 ======================================================================
+KDE SLIDER: DRIVER РАБОТАЕТ, НО POWERDEVIL ЕЩЁ НЕ УПРАВЛЯЕТ ИМ
+======================================================================
+
+Состояние, подтверждённое на M1230:
+- honor-zqcp-kbdlight.service = active (exited)
+- honor_zqcp_kbdlight загружен
+- /sys/class/leds/honor::kbd_backlight существует
+- прямые записи 0/1/2 физически меняют подсветку
+- KDE slider при этом может всё ещё ничего не делать
+
+ВАЖНО: после того как LED наконец появился и стал постоянным, UPower и
+PowerDevil надо перезапустить ЕЩЁ РАЗ. Раньше они перезапускались в момент,
+когда honor::kbd_backlight уже успевал исчезнуть.
+
+Сначала:
+
+sudo systemctl restart upower.service
+systemctl --user restart plasma-powerdevil.service
+sleep 2
+
+Проверяем, к какому sysfs LED реально привязан legacy UPower object:
+
+busctl get-property org.freedesktop.UPower \
+  /org/freedesktop/UPower/KbdBacklight \
+  org.freedesktop.UPower.KbdBacklight NativePath
+
+Проверяем его значения:
+
+busctl call org.freedesktop.UPower \
+  /org/freedesktop/UPower/KbdBacklight \
+  org.freedesktop.UPower.KbdBacklight GetBrightness
+
+busctl call org.freedesktop.UPower \
+  /org/freedesktop/UPower/KbdBacklight \
+  org.freedesktop.UPower.KbdBacklight GetMaxBrightness
+
+Прямой тест ЧЕРЕЗ UPower DBus, а не sysfs:
+
+busctl call org.freedesktop.UPower \
+  /org/freedesktop/UPower/KbdBacklight \
+  org.freedesktop.UPower.KbdBacklight SetBrightness i 0
+sleep 2
+cat /sys/class/leds/honor::kbd_backlight/brightness
+
+busctl call org.freedesktop.UPower \
+  /org/freedesktop/UPower/KbdBacklight \
+  org.freedesktop.UPower.KbdBacklight SetBrightness i 2
+cat /sys/class/leds/honor::kbd_backlight/brightness
+
+На новых UPower также пробуем перечислить все keyboard-backlight objects:
+
+busctl call org.freedesktop.UPower \
+  /org/freedesktop/UPower \
+  org.freedesktop.UPower EnumerateKbdBacklights 2>/dev/null || true
+
+busctl tree org.freedesktop.UPower | grep -i KbdBacklight || true
+
+Интерпретация:
+- NativePath указывает на honor::kbd_backlight И SetBrightness 0/2 реально
+  меняет клавиатуру -> UPower исправен, остаётся только KDE/PowerDevil cache;
+- NativePath указывает на другой LED -> KDE управляет не нашим рабочим device;
+- NativePath правильный, но SetBrightness падает -> смотреть journal UPower;
+- DBus test работает, slider нет -> logout/login KDE после restart PowerDevil.
+
+Версия UPower для диагностики:
+
+upower --version 2>/dev/null || rpm -q upower
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
