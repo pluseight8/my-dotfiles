@@ -589,6 +589,68 @@ cd /var/opt/honor-magicbook-linux
 
 sudo ALLOW_UNVERIFIED=1 bash patch/fingerprint/install.sh
 
+ВАЖНО ДЛЯ BAZZITE:
+если build проходит, но install падает с:
+
+OSError: [Errno 30] Read-only file system: '/usr/lib/udev/rules.d/70-libfprint-2.rules'
+install failed
+
+это не ошибка fingerprint patch. Bazzite держит /usr read-only, а upstream
+libfprint пытается поставить udev rule именно туда.
+
+Исправляем local installer один раз так:
+
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("patch/fingerprint/install.sh")
+s = p.read_text()
+
+old = '''    ninja -C "$GITDIR/build" >/dev/null || die "build failed"
+    ninja -C "$GITDIR/build" install >/dev/null || die "install failed"
+'''
+
+new = '''    ninja -C "$GITDIR/build" >/dev/null || die "build failed"
+
+    # Bazzite/Fedora Atomic: /usr is read-only. Stage the Meson install first,
+    # then copy the private /opt prefix and place the generated udev rule in /etc.
+    STAGE="${WORK}/stage"
+    mkdir -p "$STAGE"
+    DESTDIR="$STAGE" ninja -C "$GITDIR/build" install >/dev/null \
+        || die "staged install failed"
+
+    rm -rf "$PREFIX"
+    [[ -d "$STAGE$PREFIX" ]] \
+        || die "staged prefix missing: $STAGE$PREFIX"
+    install -d "$(dirname "$PREFIX")"
+    cp -a "$STAGE$PREFIX" "$PREFIX"
+
+    UDEV_RULE="$STAGE/usr/lib/udev/rules.d/70-libfprint-2.rules"
+    if [[ -f "$UDEV_RULE" ]]; then
+        install -Dm644 "$UDEV_RULE" /etc/udev/rules.d/70-libfprint-2.rules
+        udevadm control --reload
+        udevadm trigger --subsystem-match=usb --action=add 2>/dev/null || true
+    fi
+    restorecon -RF "$PREFIX" /etc/udev/rules.d/70-libfprint-2.rules \
+        >/dev/null 2>&1 || true
+'''
+
+if old not in s:
+    raise SystemExit("STOP: expected installer block not found; do not patch blindly")
+
+p.write_text(s.replace(old, new, 1))
+print("OK: fingerprint installer adapted for Bazzite read-only /usr")
+PY
+
+Фиксируем эту Bazzite-адаптацию в нашей local branch:
+
+git add patch/fingerprint/install.sh
+git commit -m "local: stage libfprint install for Bazzite"
+
+И повторяем:
+
+sudo ALLOW_UNVERIFIED=1 bash patch/fingerprint/install.sh
+
 Для M1230 наш recipe отправит installer на вариант M1050:
 - EgisTec ET171;
 - USB 1c7a:05aa;
