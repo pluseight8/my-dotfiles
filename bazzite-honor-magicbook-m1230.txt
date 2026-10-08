@@ -131,6 +131,7 @@ PERSIST=(
 TEMP=(
   clang
   bpftool
+  libbpf-devel
   curl
   gcc
   make
