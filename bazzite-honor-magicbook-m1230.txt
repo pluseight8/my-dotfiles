@@ -1509,6 +1509,42 @@ build/load helper напрямую. То есть module мог быть заг�
 держал состояние и корректно поднимал driver после boot.
 
 ======================================================================
+ДИАГНОСТИКА: HONOR-ZQCP-KBDLIGHT.SERVICE FAILED ПРИ ENABLE --NOW
+======================================================================
+
+Если команда:
+
+sudo systemctl enable --now honor-zqcp-kbdlight.service
+
+заканчивается сообщением:
+
+Job for honor-zqcp-kbdlight.service failed because the control process exited with error code
+
+НЕ переустанавливаем драйвер и НЕ меняем EC вручную.
+
+Сначала собираем точную причину:
+
+systemctl status honor-zqcp-kbdlight.service --no-pager -l
+sudo journalctl -xeu honor-zqcp-kbdlight.service --no-pager -n 100
+
+Потом отдельно запускаем helper вручную с shell trace:
+
+sudo bash -x /usr/local/lib/honor/kbdlight-build-load.sh
+
+И проверяем ключевые пути:
+
+uname -r
+ls -ld /lib/modules/"$(uname -r)"/build
+ls -l /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko 2>/dev/null || true
+lsmod | grep honor_zqcp || true
+ls -1 /sys/class/leds
+
+ВАЖНО:
+ошибка systemd здесь ещё не означает, что EC driver сломан. Она означает только,
+что ExecStart helper вернул ненулевой код. По trace/journal определяем конкретный
+шаг: kernel-devel, rebuild, insmod или появление LED device.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
