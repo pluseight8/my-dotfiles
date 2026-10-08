@@ -2097,6 +2097,52 @@ bash: Обновляем: command not found
 Это безвредно и к DSC failure не относится.
 
 ======================================================================
+ДИАГНОСТИКА: DSC HELPER РУЧНОЙ РАБОТАЕТ, SYSTEMD UNIT ПАДАЕТ
+======================================================================
+
+Подтверждённое состояние:
+- /usr/local/lib/honor/force-dsc.sh вручную через sudo работает;
+- после ручного запуска:
+  DSC_Enabled: yes
+  Force_DSC_Enable: yes
+  bpp=30
+  dither=no
+- тот же helper как ExecStart honor-force-dsc.service падает.
+
+Это очень похоже на SELinux denial для записи из systemd_t в debugfs.
+Не отключаем SELinux. Сначала подтверждаем точной AVC-записью.
+
+Команды:
+
+getenforce
+
+DSC_FILE=$(sudo find /sys/kernel/debug/dri \
+  -path '*/eDP-*/i915_dsc_fec_support' \
+  -print -quit)
+
+echo "$DSC_FILE"
+ls -lZ "$DSC_FILE"
+
+sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null \
+  | grep -Ei 'force-dsc|i915_dsc_fec_support|debugfs|systemd_t|dri' \
+  | tail -n 100 || true
+
+sudo journalctl -k -b --no-pager \
+  | grep -Ei 'avc|selinux|denied|i915_dsc_fec_support|force-dsc' \
+  | tail -n 100 || true
+
+И сам journal unit:
+
+sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
+
+Интерпретация:
+- если есть AVC denied для scontext=...systemd_t и target debugfs/debugfs_t,
+  причина подтверждена: systemd service блокирует SELinux;
+- если AVC нет, смотрим точный exit из journal и чиним уже не SELinux.
+
+НЕ делаем setenforce 0 и НЕ выключаем SELinux.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
