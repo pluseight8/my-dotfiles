@@ -767,8 +767,7 @@ sudo chmod 755 /usr/local/lib/honor/force-dsc.sh
 sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
 [Unit]
 Description=Force DSC on HONOR ZQC-P internal eDP panel
-After=systemd-modules-load.service
-Before=display-manager.service
+After=display-manager.service
 
 [Service]
 Type=oneshot
@@ -776,7 +775,7 @@ ExecStart=/usr/local/lib/honor/force-dsc.sh
 RemainAfterExit=yes
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=graphical.target
 EOF
 
 Включаем:
@@ -1959,6 +1958,92 @@ sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
 Если manual helper падает — его trace + journal покажут конкретную причину.
 Если manual helper срабатывает, а boot service нет — чинить надо только ordering
 systemd unit, а не графический driver и не kernel.
+
+======================================================================
+ПОДТВЕРЖДЕНО: DSC HELPER РАБОТАЕТ, BOOT SERVICE СТАРТОВАЛ СЛИШКОМ РАНО
+======================================================================
+
+На M1230 подтверждено вручную:
+
+sudo bash -x /usr/local/lib/honor/force-dsc.sh
+
+сразу даёт:
+
+DSC_Enabled: yes
+DSC_Sink_Support: yes
+Force_DSC_Enable: yes
+
+и:
+
+pipe src=3120x2080+0+0, dither=no, bpp=30
+
+Значит kernel/debugfs switch полностью исправен. Проблема была только в
+systemd ordering: старый unit запускался до display-manager и мог записать
+Force_DSC_Enable слишком рано, после чего display stack инициализировался дальше
+и состояние терялось.
+
+Переносим oneshot ПОСЛЕ display-manager и привязываем к graphical.target.
+
+Перезаписываем unit:
+
+sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
+[Unit]
+Description=Force DSC on HONOR ZQC-P internal eDP panel
+After=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/honor/force-dsc.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical.target
+EOF
+
+Обновляем systemd targets:
+
+sudo systemctl disable honor-force-dsc.service
+sudo systemctl daemon-reload
+sudo systemctl enable honor-force-dsc.service
+sudo systemctl restart honor-force-dsc.service
+
+Проверяем прямо сейчас:
+
+systemctl status honor-force-dsc.service --no-pager -l
+
+DSC_FILE=$(sudo find /sys/kernel/debug/dri \
+  -path '*/eDP-*/i915_dsc_fec_support' \
+  -print -quit)
+
+sudo cat "$DSC_FILE" | grep -E \
+  'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
+
+DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri \
+  -name i915_display_info \
+  -print -quit)
+
+sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
+
+Хотим:
+
+DSC_Enabled: yes
+DSC_Sink_Support: yes
+Force_DSC_Enable: yes
+bpp=30
+dither=no
+
+Главная проверка persistence — следующий reboot. После него НЕ запускаем helper
+вручную. Ждём health-check и смотрим:
+
+cat /var/lib/honor/health-last.txt
+
+Если после reboot там:
+- DSC force enabled
+- DSC active
+- display: bpp=30, dither=no
+- RESULT: OK
+
+то boot-ordering fix подтверждён окончательно.
 
 ======================================================================
 ОЖИДАЕМЫЙ ИТОГ
