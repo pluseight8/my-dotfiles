@@ -70,43 +70,21 @@ busctl tree org.freedesktop.UPower | grep -i KbdBacklight
 ls -1 /sys/class/leds
 ```
 
-## Fn+Space synchronization
 
-The M1230 firmware changes EC `KBBL` directly when the physical keyboard
-backlight shortcut is used. That means a normal LED-class driver can control
-the light from KDE, but its cached logical level becomes stale after Fn+Space.
+## Fn+Space behavior
 
-The driver now polls `KBBL` every 200 ms (module parameter `poll_ms`) and
-enables `LED_BRIGHT_HW_CHANGED`. When the EC changes between the documented
-`off / low / high` values, the driver updates its logical brightness and calls
-`led_classdev_notify_brightness_hw_changed()`.
+KDE/UPower control the keyboard backlight through `honor::kbd_backlight`.
 
-UPower watches the LED-class hardware-brightness notification and relays it to
-desktop power managers. This is the standard path used to keep firmware
-keyboard-backlight keys and a desktop slider synchronized.
+Firmware-side Fn+Space is intentionally left independent. The driver does not
+poll EC `KBBL` just to keep the desktop slider visually synchronized, avoiding
+periodic EC reads/wakeups.
 
-The special EC value `0x01` means "latch current level" and does not encode
-which level is active, so the driver keeps the last known logical value while
-KBBL is latched.
+So the intended behavior is:
 
-After installing this version, verify:
+- KDE slider -> physical keyboard backlight: works.
+- direct sysfs 0/1/2 -> physical keyboard backlight: works.
+- Fn+Space -> physical keyboard backlight: firmware handles it.
+- KDE slider may not visually follow a level changed only by Fn+Space.
 
-```bash
-ls /sys/class/leds/honor::kbd_backlight/brightness_hw_changed
-cat /sys/class/leds/honor::kbd_backlight/brightness
-```
-
-Then press Fn+Space and watch:
-
-```bash
-watch -n 0.2 cat /sys/class/leds/honor::kbd_backlight/brightness
-```
-
-The value should follow the physical shortcut as `0 / 1 / 2`.
-
-If sysfs follows Fn+Space but KDE does not refresh, restart UPower and PowerDevil:
-
-```bash
-sudo systemctl restart upower.service
-systemctl --user restart plasma-powerdevil.service
-```
+If a clean event-driven firmware notification path is implemented later, it can
+replace this without periodic polling.
