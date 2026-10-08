@@ -34,3 +34,12 @@ References:
 
 - https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010
 - https://github.com/drphilth/honor-magicbook-pro-14-ubuntu
+
+## Bazzite updates
+
+Keep `gcc` and `make` installed on the host. The boot service recompiles the
+out-of-tree module when `uname -r` changes. Removing those build tools would
+make the automatic rebuild fail after a future kernel update.
+
+Other temporary build dependencies used for HID-BPF or libfprint are not needed
+by this module at runtime.
