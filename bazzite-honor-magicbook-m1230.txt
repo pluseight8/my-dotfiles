@@ -2046,6 +2046,57 @@ cat /var/lib/honor/health-last.txt
 то boot-ordering fix подтверждён окончательно.
 
 ======================================================================
+ДИАГНОСТИКА: HONOR-FORCE-DSC.SERVICE FAILED ПОСЛЕ ПЕРЕНОСА НА GRAPHICAL.TARGET
+======================================================================
+
+Если после изменения unit на:
+
+After=display-manager.service
+WantedBy=graphical.target
+
+команда:
+
+sudo systemctl restart honor-force-dsc.service
+
+падает с "control process exited with error code", сначала НЕ меняем helper и
+НЕ добавляем новые sleeps вслепую.
+
+Смотрим точную ошибку systemd:
+
+systemctl status honor-force-dsc.service --no-pager -l
+sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
+
+Потом проверяем, что systemd реально видит актуальную версию unit:
+
+systemctl cat honor-force-dsc.service
+
+Проверяем зависимости/ordering:
+
+systemctl show honor-force-dsc.service \
+  -p After -p Before -p WantedBy -p ActiveState -p SubState -p Result
+
+И запускаем тот же helper вручную сразу после падения service:
+
+sudo bash -x /usr/local/lib/honor/force-dsc.sh
+
+После этого:
+
+DSC_FILE=$(sudo find /sys/kernel/debug/dri \
+  -path '*/eDP-*/i915_dsc_fec_support' \
+  -print -quit)
+
+sudo cat "$DSC_FILE"
+
+Если manual helper снова срабатывает, а unit падает, причина точно в условиях
+systemd запуска/ordering, а не в DSC debugfs switch.
+
+ПРИМЕЧАНИЕ:
+строка "Обновляем systemd targets:" в гайде — это обычный текст, НЕ команда.
+Если её случайно вставить в shell, будет:
+bash: Обновляем: command not found
+Это безвредно и к DSC failure не относится.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
