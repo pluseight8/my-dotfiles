@@ -1442,6 +1442,38 @@ honor-zqcp-kbdlight.service при boot проверяет текущий kernel
 доступен.
 
 ======================================================================
+ДИАГНОСТИКА: HONOR::KBD_BACKLIGHT ПРОПАЛ ПОСЛЕ УСТАНОВКИ
+======================================================================
+
+Если прямой sysfs test раньше работал:
+
+echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+
+но позже `ls -1 /sys/class/leds` больше НЕ показывает
+`honor::kbd_backlight`, сначала НИЧЕГО не переустанавливаем.
+
+Собрать состояние service/module/journal:
+
+systemctl status honor-zqcp-kbdlight.service --no-pager -l
+lsmod | grep honor_zqcp || true
+sudo journalctl -u honor-zqcp-kbdlight.service -b --no-pager -n 50
+
+Также проверить, существует ли LED сейчас:
+
+test -d /sys/class/leds/honor::kbd_backlight \
+  && echo "honor::kbd_backlight: PRESENT" \
+  || echo "honor::kbd_backlight: MISSING"
+
+Эти команды нужны, чтобы понять, почему модуль, который уже доказанно умеет
+управлять физической подсветкой на M1230, не остаётся загруженным/не создаёт
+LED после последующих действий или boot.
+
+ВАЖНО ДЛЯ ЭТОГО ГАЙДА:
+все следующие диагностические и исправляющие команды по этой установке должны
+сначала добавляться сюда в GitHub, а уже потом выполняться на ноутбуке.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
