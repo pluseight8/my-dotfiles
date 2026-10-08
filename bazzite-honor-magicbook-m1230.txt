@@ -327,8 +327,6 @@ cd /var/opt/honor-magicbook-linux
 LIVE=""
 
 for f in /sys/firmware/acpi/tables/SSDT*; do
-    [[ -r "$f" ]] || continue
-
     OEM=$(sudo dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\0 ')
 
     if [[ "$OEM" == "I2C_DEVT" ]]; then
@@ -338,23 +336,21 @@ for f in /sys/firmware/acpi/tables/SSDT*; do
 done
 
 if [[ -z "$LIVE" ]]; then
-    echo "STOP: I2C_DEVT не найдена."
-    exit 1
+    echo "STOP: I2C_DEVT не найдена. НЕ продолжай со следующим шагом."
+else
+    LIVE_MD5=$(sudo md5sum "$LIVE" | awk '{print $1}')
+    REF_MD5=$(md5sum dump/acpi/zqc-p/SSDT27_orig.aml | awk '{print $1}')
+
+    echo "LIVE TABLE: $LIVE"
+    echo "LIVE MD5 : $LIVE_MD5"
+    echo "REPO MD5 : $REF_MD5"
+
+    if [[ "$LIVE_MD5" == "$REF_MD5" ]]; then
+        echo "OK: заводская I2C_DEVT полностью совпадает с reference."
+    else
+        echo "STOP: таблицы отличаются. AML НЕ устанавливаем и дальше НЕ продолжай."
+    fi
 fi
-
-LIVE_MD5=$(sudo md5sum "$LIVE" | awk '{print $1}')
-REF_MD5=$(md5sum dump/acpi/zqc-p/SSDT27_orig.aml | awk '{print $1}')
-
-echo "LIVE TABLE: $LIVE"
-echo "LIVE MD5 : $LIVE_MD5"
-echo "REPO MD5 : $REF_MD5"
-
-if [[ "$LIVE_MD5" != "$REF_MD5" ]]; then
-    echo "STOP: таблицы отличаются. AML НЕ устанавливаем."
-    exit 1
-fi
-
-echo "OK: заводская I2C_DEVT полностью совпадает с reference."
 
 Только если в конце было OK — продолжаем.
 
