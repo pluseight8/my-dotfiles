@@ -151,29 +151,29 @@ TEMP=(
 TO_INSTALL=()
 TEMP_MISSING=()
 
-for p in "\${PERSIST[@]}"; do
+for p in "${PERSIST[@]}"; do
     rpm -q "$p" >/dev/null 2>&1 || TO_INSTALL+=("$p")
 done
 
-for p in "\${TEMP[@]}"; do
+for p in "${TEMP[@]}"; do
     if ! rpm -q "$p" >/dev/null 2>&1; then
         TO_INSTALL+=("$p")
         TEMP_MISSING+=("$p")
     fi
 done
 
-if (( \${#TEMP_MISSING[@]} )); then
-    printf '%s\n' "\${TEMP_MISSING[@]}" | sudo tee /var/lib/honor/temp-layered.txt >/dev/null
+if (( ${#TEMP_MISSING[@]} )); then
+    printf '%s\n' "${TEMP_MISSING[@]}" | sudo tee /var/lib/honor/temp-layered.txt >/dev/null
 else
     sudo truncate -s0 /var/lib/honor/temp-layered.txt
 fi
 
 printf 'Будут добавлены:'
-printf ' %s' "\${TO_INSTALL[@]}"
+printf ' %s' "${TO_INSTALL[@]}"
 printf '\n'
 
-if (( \${#TO_INSTALL[@]} )); then
-    sudo rpm-ostree install "\${TO_INSTALL[@]}"
+if (( ${#TO_INSTALL[@]} )); then
+    sudo rpm-ostree install "${TO_INSTALL[@]}"
 else
     echo "Все нужные пакеты уже есть."
 fi
@@ -797,7 +797,7 @@ PSR="$(cat /sys/module/xe/parameters/enable_psr 2>/dev/null || true)"
 if [[ "$PSR" == "1" ]]; then
     ok "xe.enable_psr=1"
 else
-    bad "xe.enable_psr=\${PSR:-missing}"
+    bad "xe.enable_psr=${PSR:-missing}"
 fi
 
 if command -v udev-hid-bpf >/dev/null 2>&1; then
@@ -935,8 +935,8 @@ cat /var/lib/honor/temp-layered.txt
 
 mapfile -t REMOVE < /var/lib/honor/temp-layered.txt
 
-if (( \${#REMOVE[@]} )); then
-    sudo rpm-ostree uninstall "\${REMOVE[@]}"
+if (( ${#REMOVE[@]} )); then
+    sudo rpm-ostree uninstall "${REMOVE[@]}"
 else
     echo "Временных layered packages для удаления нет."
 fi
