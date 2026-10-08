@@ -1325,6 +1325,58 @@ docs/LIMITATIONS.md и docs/hardware/zqc-p.md.
 keyboard backlight slider в KDE считать НЕРАБОЧИМ.
 
 ======================================================================
+ДОПОЛНЕНИЕ: РЕАЛЬНОЕ УПРАВЛЕНИЕ ПОДСВЕТКОЙ КЛАВИАТУРЫ НА M1230
+======================================================================
+
+На ZQC-P штатный KDE/UPower slider может существовать, но через текущий
+huawei-wmi физическую яркость не менять.
+
+Для M1230 добавлен отдельный GPL LED-class driver:
+honor-zqcp-kbdlight/
+
+Он основан на drphilth honor-fmbp-kbdlight и адаптирован только под:
+- HONOR
+- ZQC-P
+- board M1230
+
+Перед загрузкой installer дополнительно проверяет, что текущий DSDT содержит
+KBBL/GKBM/SKBM. Модуль использует документированный EC KBBL offset 0x41:
+- 0x04 off
+- 0x02 low
+- 0x03 high
+- 0x01 latch
+
+Он регистрирует отдельный LED:
+
+/sys/class/leds/honor::kbd_backlight
+
+и не меняет физическую яркость при самой загрузке модуля.
+
+Установка из my-dotfiles:
+
+rm -rf /tmp/my-dotfiles
+git clone --depth 1 https://github.com/pluseight8/my-dotfiles.git /tmp/my-dotfiles
+sudo bash /tmp/my-dotfiles/honor-zqcp-kbdlight/install-bazzite.sh
+
+Проверка напрямую:
+
+echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+echo 1 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+
+Если эти три значения реально меняют подсветку, KDE/UPower можно перезапустить:
+
+sudo systemctl restart upower.service
+
+После этого при необходимости один раз выйти из KDE и войти обратно.
+
+Для обновлений Bazzite:
+source и собранные модули лежат в /var/lib/honor.
+honor-zqcp-kbdlight.service при boot проверяет текущий kernel и автоматически
+пересобирает модуль, если kernel release изменился и matching kernel-devel
+доступен.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
