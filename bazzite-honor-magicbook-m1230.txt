@@ -533,6 +533,26 @@ cd /var/opt/honor-magicbook-linux
 
 sudo ALLOW_UNVERIFIED=1 bash patch/touchpad-edge/install.sh
 
+ВАЖНО ДЛЯ ТЕКУЩЕГО BAZZITE:
+upstream installer в конце проверяет attach через старую команду
+"udev-hid-bpf list-loaded". В текущем Bazzite этой подкоманды уже нет, поэтому
+installer может закончиться ложной ошибкой:
+
+the program is not attached to the device
+
+Если перед этим уже было:
+- building honor-tops0102-edge.bpf.o
+- installing to /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o
+- attaching to 0018:27C6:0F9A....
+
+то объект уже собран и установлен. Просто делаем ручной attach новой CLI:
+
+DEV=$(find /sys/bus/hid/devices -maxdepth 1 -name '*27C6:0F9A*' -print -quit)
+echo "$DEV"
+
+sudo udev-hid-bpf remove "$DEV" 2>/dev/null || true
+sudo udev-hid-bpf add "$DEV" /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o
+
 Проверка установленного объекта:
 
 test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o && echo "touchpad-edge BPF object: OK"
