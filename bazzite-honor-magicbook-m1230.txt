@@ -497,13 +497,19 @@ https://raw.githubusercontent.com/gregkh/linux/v7.2.8/drivers/hid/bpf/progs/hid_
 содержимое совпадает байт-в-байт, Git blob SHA
 7cabd1b2e8371e9bdac39d0279fd62b78f6dcc44
 
-После окончания:
+После окончания installer сам должен написать:
 
-sudo udev-hid-bpf list-devices
+phantom KEY_MICMUTE device is gone.
 
-Должен быть:
+Проверяем, что объект установлен:
 
-honor_ftsc1000_micmute
+test -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o && echo "micmute BPF object: OK"
+
+Проверяем service:
+
+systemctl is-active honor-hid-bpf-reapply.service
+
+udev-hid-bpf list-devices показывает HID-устройства, а не список загруженных BPF-программ.
 
 Проверяем фантомный input device:
 
@@ -527,9 +533,9 @@ cd /var/opt/honor-magicbook-linux
 
 sudo ALLOW_UNVERIFIED=1 bash patch/touchpad-edge/install.sh
 
-Проверка:
+Проверка установленного объекта:
 
-sudo udev-hid-bpf list-devices | grep honor_tops0102
+test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o && echo "touchpad-edge BPF object: OK"
 
 Теперь попробуй провести пальцем по левому краю тачпада.
 
@@ -811,15 +817,23 @@ else
 fi
 
 if command -v udev-hid-bpf >/dev/null 2>&1; then
-    BPF="$(udev-hid-bpf list-devices 2>/dev/null || true)"
+    if [[ -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o ]]; then
+        ok "micmute HID-BPF object installed"
+    else
+        bad "micmute HID-BPF object отсутствует"
+    fi
 
-    grep -qi 'honor_ftsc1000_micmute' <<<"$BPF" \
-        && ok "micmute HID-BPF loaded" \
-        || bad "micmute HID-BPF не loaded"
+    if [[ -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o ]]; then
+        ok "touchpad-edge HID-BPF object installed"
+    else
+        bad "touchpad-edge HID-BPF object отсутствует"
+    fi
 
-    grep -qi 'honor_tops0102' <<<"$BPF" \
-        && ok "touchpad-edge HID-BPF loaded" \
-        || bad "touchpad-edge HID-BPF не loaded"
+    if systemctl is-active --quiet honor-hid-bpf-reapply.service; then
+        ok "micmute re-apply service active"
+    else
+        bad "micmute re-apply service not active"
+    fi
 else
     bad "udev-hid-bpf command отсутствует"
 fi
@@ -1027,13 +1041,16 @@ sudo grep '^PSR mode' "$PSR_FILE"
 
 Хотим PSR1 enabled.
 
-BPF:
+BPF objects:
 
-sudo udev-hid-bpf list-devices
+test -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o && echo "micmute: OK"
+test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o && echo "touchpad-edge: OK"
 
-Должны быть:
-- honor_ftsc1000_micmute;
-- honor_tops0102...
+Micmute re-apply:
+
+systemctl is-active honor-hid-bpf-reapply.service
+
+Должно быть active.
 
 Fingerprint:
 
