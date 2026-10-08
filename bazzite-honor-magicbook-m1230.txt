@@ -1474,6 +1474,41 @@ LED после последующих действий или boot.
 сначала добавляться сюда в GitHub, а уже потом выполняться на ноутбуке.
 
 ======================================================================
+FIX: KBDLIGHT SERVICE БЫЛ ENABLED, НО НЕ ЗАПУЩЕН КАК SYSTEMD UNIT
+======================================================================
+
+Если прямой sysfs test раньше работал, но позже
+/sys/class/leds/honor::kbd_backlight исчез, первым делом запускаем service
+как настоящий systemd unit, а не только helper вручную:
+
+sudo systemctl enable --now honor-zqcp-kbdlight.service
+
+Проверяем:
+
+systemctl status honor-zqcp-kbdlight.service --no-pager -l
+lsmod | grep honor_zqcp || true
+test -d /sys/class/leds/honor::kbd_backlight \
+  && echo "honor::kbd_backlight: PRESENT" \
+  || echo "honor::kbd_backlight: MISSING"
+
+Если PRESENT, сразу проверяем физическую подсветку:
+
+echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+sleep 2
+echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+
+После этого перезапускаем userspace power stack:
+
+sudo systemctl restart upower.service
+systemctl --user restart plasma-powerdevil.service
+
+Причина этого шага:
+первый вариант install-bazzite.sh делал `systemctl enable`, а затем запускал
+build/load helper напрямую. То есть module мог быть загружен, но сам unit не
+становился active. Теперь service должен быть ENABLED + ACTIVE, чтобы systemd
+держал состояние и корректно поднимал driver после boot.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
