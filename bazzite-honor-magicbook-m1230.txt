@@ -2547,6 +2547,58 @@ sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null \
 cat /var/lib/honor/health-last.txt
 
 ======================================================================
+ПОДТВЕРЖДЕНО: HONOR-FORCE-DSC.SERVICE РАБОТАЕТ
+======================================================================
+
+Финальное рабочее состояние подтверждено:
+
+honor-force-dsc.service:
+  Active: active (exited)
+  ExecStart=/usr/bin/bash /usr/local/lib/honor/force-dsc.sh
+  status=0/SUCCESS
+
+DSC:
+  DSC_Enabled: yes
+  DSC_Sink_Support: yes
+  Force_DSC_Enable: yes
+
+Display:
+  dither=no
+  bpp=30
+
+Если сразу после этого `ausearch -ts recent` всё ещё показывает AVC
+`denied { entrypoint }` для force-dsc.sh, проверь время записи. На этой
+установке найденный AVC был от ПРЕДЫДУЩЕЙ неудачной попытки прямого ExecStart
+в 01:04:27, а успешный service стартовал позже, в 01:06:20.
+
+То есть старый AVC в окне "recent" не означает, что текущий запуск снова
+сломался.
+
+Финальная проверка persistence:
+
+systemctl reboot
+
+После загрузки НИЧЕГО DSC вручную не запускать.
+Подождать примерно 45-60 секунд и посмотреть:
+
+cat /var/lib/honor/health-last.txt
+
+Хотим:
+
+[ OK ] DSC force enabled
+[ OK ] DSC active
+[ OK ] display: bpp=30, dither=no
+RESULT: OK
+
+Отдельно можно подтвердить service:
+
+systemctl is-active honor-force-dsc.service
+
+Ожидаем:
+
+active
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
