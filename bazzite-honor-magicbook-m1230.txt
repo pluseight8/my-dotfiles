@@ -2237,6 +2237,78 @@ cat /var/lib/honor/health-last.txt
 Если RESULT: OK — автоматический DSC после boot подтверждён.
 
 ======================================================================
+ДИАГНОСТИКА: 90-СЕКУНДНЫЙ DSC HELPER ВСЁ РАВНО ПАДАЕТ ИЗ SYSTEMD
+======================================================================
+
+Если после замены helper на 90-секундное ожидание:
+
+sudo systemctl restart honor-force-dsc.service
+
+всё равно падает, больше НИЧЕГО не меняем наугад.
+
+Нужно понять две вещи:
+1) service реально ждёт 90 секунд или завершается раньше;
+2) видит ли process, запущенный systemd, тот же debugfs path, который видит
+   обычный sudo shell.
+
+Сначала точный journal последнего запуска:
+
+date
+systemctl show honor-force-dsc.service \
+  -p Result -p ExecMainCode -p ExecMainStatus -p ActiveState -p SubState \
+  -p TimeoutStartUSec
+
+sudo journalctl -u honor-force-dsc.service -b --no-pager \
+  --since "5 minutes ago"
+
+Теперь обычный root shell — контроль:
+
+sudo bash -lc '
+echo "=== ROOT SHELL ==="
+id
+find /sys/kernel/debug/dri \
+  -path "*/eDP-*/i915_dsc_fec_support" \
+  -print -ls
+'
+
+Теперь тот же probe именно как transient systemd service:
+
+sudo systemd-run \
+  --unit=honor-dsc-probe \
+  --wait --collect --pipe \
+  /usr/bin/bash -lc '
+    echo "=== SYSTEMD SERVICE ==="
+    id
+    mountpoint /sys/kernel/debug || true
+    ls -ldZ /sys/kernel/debug /sys/kernel/debug/dri 2>&1 || true
+    find /sys/kernel/debug/dri \
+      -path "*/eDP-*/i915_dsc_fec_support" \
+      -print -ls 2>&1
+  '
+
+После probe сразу смотрим SELinux:
+
+sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null \
+  | tail -n 100 || true
+
+И kernel journal:
+
+sudo journalctl -k -b --no-pager \
+  --since "5 minutes ago" \
+  | grep -Ei 'avc|selinux|denied|debugfs|i915_dsc|xe' \
+  | tail -n 100 || true
+
+Интерпретация:
+- ROOT SHELL видит i915_dsc_fec_support, а SYSTEMD SERVICE нет ->
+  проблема именно в service context / access к debugfs;
+- оба видят файл, но honor-force-dsc.service всё равно падает ->
+  смотрим ExecMainStatus/journal и сам helper;
+- service завершается заметно раньше 90 секунд ->
+  ищем внешний systemd timeout/kill;
+- AVC появляется после systemd-run probe -> SELinux всё-таки подтверждён;
+- AVC нет и systemd-run видит файл -> SELinux можно окончательно исключить.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
