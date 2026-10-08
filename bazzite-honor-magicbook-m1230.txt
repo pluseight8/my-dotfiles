@@ -1028,28 +1028,73 @@ sudo systemctl enable honor-health-check.timer
 
 
 ======================================================================
-ШАГ 17. УДАЛЯЕМ ТОЛЬКО ВРЕМЕННЫЕ BUILD-ПАКЕТЫ
+ШАГ 17. ЧИСТИМ LAYERED BUILD-ПАКЕТЫ, НО НЕ ЛОМАЕМ KBDLIGHT REBUILD
 ======================================================================
 
-Git НЕ удаляем: он нужен honor-source-update.
+ВАЖНО: после добавления honor-zqcp-kbdlight НЕЛЬЗЯ удалять вообще все build
+tools из temp-layered.txt.
 
-Смотрим список того, что было временно добавлено именно нами:
+Наш service /usr/local/lib/honor/kbdlight-build-load.sh после обновления kernel
+при необходимости сам пересобирает honor_zqcp_kbdlight.ko. Для этого ему
+нужны как минимум:
+
+- gcc
+- make
+
+matching kernel-devel Bazzite сейчас поставляет вместе со своим OGC kernel.
+
+Git тоже оставляем: он нужен honor-source-update.
+
+Остальные build-only пакеты после успешной установки micmute/touchpad/fingerprint
+в runtime не нужны. Их можно удалить, чтобы уменьшить rpm-ostree layering.
+
+Посмотреть, что мы временно добавляли:
 
 cat /var/lib/honor/temp-layered.txt
 
-Теперь:
+Безопасно удалить всё из этого списка КРОМЕ gcc и make:
 
-mapfile -t REMOVE < /var/lib/honor/temp-layered.txt
+mapfile -t ALL_TEMP < /var/lib/honor/temp-layered.txt
+REMOVE=()
+
+for p in "${ALL_TEMP[@]}"; do
+    case "$p" in
+        gcc|make)
+            echo "KEEP: $p (нужен для автоматической пересборки kbdlight)"
+            ;;
+        *)
+            REMOVE+=("$p")
+            ;;
+    esac
+done
 
 if (( ${#REMOVE[@]} )); then
     sudo rpm-ostree uninstall "${REMOVE[@]}"
 else
-    echo "Временных layered packages для удаления нет."
+    echo "Нечего удалять."
 fi
+
+Отдельно libbpf-devel, если мы layer'или его позже для HID-BPF, в runtime тоже
+не нужен: уже установленные CO-RE .bpf.o работают без него.
+
+Проверить:
+
+rpm -q libbpf-devel >/dev/null 2>&1 && echo "libbpf-devel layered/present"
+
+Если он был добавлен нами через rpm-ostree, его можно снять:
+
+sudo rpm-ostree uninstall libbpf-devel
+
+Если rpm-ostree скажет, что пакет не requested/layered — просто ничего не делай.
 
 Проверяем pending deployment:
 
 rpm-ostree status -v
+
+Почему вообще чистим:
+Bazzite официально предупреждает, что лишние rpm-ostree layered packages могут
+замедлять обновления и иногда блокировать upgrade/rebase из-за dependency
+conflicts. Поэтому держим только то, что реально нужно host-системе.
 
 
 ======================================================================
