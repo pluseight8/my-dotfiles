@@ -1248,6 +1248,63 @@ RESULT: OK
 
 
 ======================================================================
+ЧТО ПЕРЕЖИВАЕТ ОБЫЧНЫЙ BAZZITE UPDATE
+======================================================================
+
+Обычный Bazzite deployment update НЕ должен сам по себе снести установленные
+HONOR fixes.
+
+Ожидаемо сохраняются:
+- ACPI override в /etc/honor-magicbook/acpi + dracut config в /etc;
+- rpm-ostree initramfs local mode;
+- kernel arg xe.enable_psr=1;
+- HID-BPF objects в /etc/udev-hid-bpf;
+- honor-hid-bpf-reapply.service;
+- touchpad-edge HID-BPF (CO-RE, boot-time attach через udev-hid-bpf);
+- private fingerprint libfprint в /opt/honor-libfprint-sdcp;
+- ld.so config и udev rule в /etc;
+- honor-force-dsc.service + helper;
+- honor-health-check.timer;
+- honor-zqcp-kbdlight.service + source/helper в /var/lib/honor и /usr/local/lib/honor;
+- source tree в /var/opt/honor-magicbook-linux.
+
+Единственный компонент, который реально привязан к версии kernel — наш
+out-of-tree honor_zqcp_kbdlight.ko. Его service специально проверяет uname -r и
+при смене kernel пересобирает .ko, если matching kernel-devel доступен. После
+сборки installer/helper ставит SELinux type modules_object_t перед insmod.
+
+Что всё же МОЖЕТ сломаться после большого update:
+1. kernel API изменится и honor_zqcp_kbdlight перестанет собираться;
+2. OGC kernel уберёт/переименует debugfs i915_dsc_fec_support — тогда DSC service
+   упадёт, но система загрузится;
+3. HID-BPF kernel ABI/BTF изменится настолько, что существующий CO-RE object не
+   сможет загрузиться (обычно CO-RE как раз сделан, чтобы этого не требовалось);
+4. новый fprintd/libfprint ABI окажется несовместим с private SDCP library;
+5. layered rpm-ostree package получит dependency conflict и сам update
+   остановится до разрешения конфликта;
+6. BIOS update изменит ACPI table/EC layout — это отдельный риск, опаснее
+   обычного Bazzite update.
+
+После КАЖДОГО Bazzite update + reboot достаточно сначала посмотреть автоматический
+health-check:
+
+cat /var/lib/honor/health-last.txt
+
+И дополнительно keyboard backlight service:
+
+systemctl is-active honor-zqcp-kbdlight.service
+test -d /sys/class/leds/honor::kbd_backlight \
+  && echo "kbdlight: OK" \
+  || echo "kbdlight: FAIL"
+
+Если health-last.txt заканчивается RESULT: OK и kbdlight: OK — ничего
+переустанавливать не надо.
+
+Если новый deployment реально сломал загрузку/графику, остаётся rollback на
+предыдущий deployment; рабочий deployment был дополнительно pinned в начале
+гайда.
+
+======================================================================
 КАК ОБНОВЛЯТЬ САМ HONOR-РЕПОЗИТОРИЙ
 ======================================================================
 
