@@ -774,7 +774,7 @@ After=display-manager.service
 [Service]
 Type=oneshot
 SELinuxContext=system_u:system_r:unconfined_service_t:s0
-ExecStart=/usr/local/lib/honor/force-dsc.sh
+ExecStart=/usr/bin/bash /usr/local/lib/honor/force-dsc.sh
 RemainAfterExit=yes
 
 [Install]
@@ -2464,6 +2464,87 @@ cat /var/lib/honor/health-last.txt
 мы не даём всем init_t services право писать в debugfs. Только этот один
 root-owned oneshot запускается в уже существующем Fedora domain
 unconfined_service_t.
+
+======================================================================
+FIX: 203/EXEC PERMISSION DENIED ПОСЛЕ SELINUXCONTEXT
+======================================================================
+
+Если после добавления:
+
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+
+service падает так:
+
+status=203/EXEC
+Failed to execute /usr/local/lib/honor/force-dsc.sh: Permission denied
+Failed at step EXEC
+
+это уже НЕ ошибка DSC write.
+
+Причина: systemd пытается напрямую exec'нуть shell-script из /usr/local/lib
+уже в unconfined_service_t. Для этого SELinux transition/entrypoint на самом
+script path может не разрешаться.
+
+Fedora policy для unconfined_service_t разрешает стандартный shell entrypoint,
+поэтому запускаем /usr/bin/bash как executable, а force-dsc.sh передаём ему как
+обычный читаемый script.
+
+Перезаписываем unit:
+
+sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
+[Unit]
+Description=Force DSC on HONOR ZQC-P internal eDP panel
+After=display-manager.service
+
+[Service]
+Type=oneshot
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+ExecStart=/usr/bin/bash /usr/local/lib/honor/force-dsc.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical.target
+EOF
+
+Применяем:
+
+sudo systemctl daemon-reload
+sudo systemctl restart honor-force-dsc.service
+
+Проверяем:
+
+systemctl status honor-force-dsc.service --no-pager -l
+
+DSC_FILE=$(sudo find /sys/kernel/debug/dri \
+  -path '*/eDP-*/i915_dsc_fec_support' \
+  -print -quit)
+
+sudo cat "$DSC_FILE" | grep -E \
+  'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
+
+DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri \
+  -name i915_display_info \
+  -print -quit)
+
+sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
+
+Ожидаем:
+- service: active (exited)
+- DSC_Enabled: yes
+- Force_DSC_Enable: yes
+- bpp=30
+- dither=no
+
+Потом проверяем, не появилось ли СВЕЖЕГО AVC для force-dsc:
+
+sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null \
+  | grep -Ei 'force-dsc|i915_dsc_fec_support' \
+  | tail -n 20 || true
+
+Если service active и свежего AVC нет — reboot.
+После reboot helper вручную НЕ запускать; через ~45-60 секунд:
+
+cat /var/lib/honor/health-last.txt
 
 ======================================================================
 ОЖИДАЕМЫЙ ИТОГ
