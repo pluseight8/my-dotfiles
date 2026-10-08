@@ -1637,6 +1637,71 @@ sudo dmesg | tail -n 100
 НЕ отключать SELinux и НЕ менять Secure Boot ради теста.
 
 ======================================================================
+FIX: SELINUX БЛОКИРУЕТ KBDLIGHT .KO ИЗ /VAR/LIB/HONOR
+======================================================================
+
+Подтверждённая причина на M1230:
+
+- kernel.modules_disabled = 0
+- SELinux = Enforcing
+- ручной sudo insmod того же .ko работает (insmod rc=0)
+- honor_zqcp_kbdlight появляется в lsmod
+- /sys/class/leds/honor::kbd_backlight появляется
+- journal/ausearch показывает AVC denial:
+  comm="insmod"
+  path="/var/lib/honor/kbdlight/.../honor_zqcp_kbdlight.ko"
+  scontext=system_u:system_r:systemd_t
+  tcontext=system_u:object_r:var_lib_t
+  denied { module_load }
+
+То есть сам модуль исправен. Systemd service падает потому, что .ko лежит под
+/var/lib/honor и имеет SELinux label var_lib_t, из которого systemd_t не может
+делать module_load.
+
+НЕ отключаем SELinux.
+
+Сначала смотрим SELinux type обычного kernel module в /lib/modules:
+
+REF_MODULE="$(find /lib/modules/"$(uname -r)" -type f -name '*.ko*' -print -quit)"
+echo "$REF_MODULE"
+ls -lZ "$REF_MODULE"
+
+Если type у reference module = modules_object_t, присваиваем тот же type нашему
+module tree:
+
+sudo chcon -R -t modules_object_t /var/lib/honor/kbdlight
+
+Проверяем:
+
+ls -lZ /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko
+
+Если honor_zqcp_kbdlight уже загружен вручную, выгружаем его перед повторным
+стартом service:
+
+sudo rmmod honor_zqcp_kbdlight 2>/dev/null || true
+
+Теперь:
+
+sudo systemctl restart honor-zqcp-kbdlight.service
+systemctl status honor-zqcp-kbdlight.service --no-pager -l
+
+Проверяем:
+
+lsmod | grep honor_zqcp || true
+ls -1 /sys/class/leds | grep -E 'honor|huawei|kbd' || true
+
+И физический тест:
+
+echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+sleep 2
+echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+
+ВАЖНО:
+chcon подтверждает/fixes проблему прямо сейчас, но label может потеряться, если
+файл будет создан заново при rebuild. Поэтому после подтверждения installer/
+rebuild helper должен сам ставить корректный SELinux type на новый .ko.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
