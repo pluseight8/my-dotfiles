@@ -1545,6 +1545,39 @@ ls -1 /sys/class/leds
 шаг: kernel-devel, rebuild, insmod или появление LED device.
 
 ======================================================================
+ДИАГНОСТИКА: INSMOD -> OPERATION NOT PERMITTED
+======================================================================
+
+Если journal/helper показывает примерно это:
+
+insmod: ERROR: could not insert module .../honor_zqcp_kbdlight.ko: Operation not permitted
+
+при этом:
+- matching /lib/modules/$(uname -r)/build существует;
+- honor_zqcp_kbdlight.ko успешно собран;
+- lsmod не показывает honor_zqcp_kbdlight;
+
+то наиболее вероятная причина — Secure Boot / kernel lockdown не разрешает
+загрузку нашего неподписанного out-of-tree .ko.
+
+НЕ отключаем Secure Boot вслепую. Сначала подтверждаем:
+
+mokutil --sb-state || true
+cat /sys/kernel/security/lockdown 2>/dev/null || true
+sudo dmesg | grep -iE 'lockdown|secure boot|verification|module.*signature|unsigned|key.*rejected' | tail -n 80
+
+Также смотрим подпись модуля:
+
+modinfo -F signer /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko 2>/dev/null || true
+modinfo -F sig_id /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko 2>/dev/null || true
+
+Если signer пустой, а Secure Boot/lockdown включён и dmesg говорит про
+verification/signature/key rejection, причина подтверждена: модуль надо
+подписать доверенным ключом, а не пересобирать заново и не трогать EC mapping.
+
+До подтверждения ничего в BIOS не меняем.
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
