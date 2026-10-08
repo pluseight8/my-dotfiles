@@ -484,6 +484,19 @@ cd /var/opt/honor-magicbook-linux
 
 sudo ALLOW_UNVERIFIED=1 bash patch/micmute/install.sh
 
+Если installer падает с:
+could not fetch drivers/hid/bpf/progs/hid_bpf.h at v7.2.8
+
+сначала проверь доступ к официальному stable header:
+
+curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
+https://raw.githubusercontent.com/gregkh/linux/v7.2.8/drivers/hid/bpf/progs/hid_bpf.h \
+-o /tmp/hid_bpf.h && echo "OK" && wc -c /tmp/hid_bpf.h
+
+Этот hid_bpf.h сверялся с OpenGamingCollective/linux v7.2.8-ogc5:
+содержимое совпадает байт-в-байт, Git blob SHA
+7cabd1b2e8371e9bdac39d0279fd62b78f6dcc44
+
 После окончания:
 
 sudo udev-hid-bpf list-loaded
