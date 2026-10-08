@@ -1824,68 +1824,22 @@ busctl tree org.freedesktop.UPower | grep -i KbdBacklight || true
 upower --version 2>/dev/null || rpm -q upower
 
 ======================================================================
-FIX: СИНХРОНИЗАЦИЯ KDE SLIDER <-> FN+SPACE
+РЕШЕНИЕ: FN+SPACE НЕ СИНХРОНИЗИРУЕМ С KDE ЧЕРЕЗ POLLING
 ======================================================================
 
-Состояние перед этим шагом:
-- honor-zqcp-kbdlight.service active;
-- прямой sysfs 0/1/2 меняет физическую подсветку;
-- KDE slider уже управляет honor::kbd_backlight через UPower;
-- Fn+Space физически переключает подсветку, но slider/логическое состояние
-  может не обновляться.
+От варианта с опросом EC KBBL каждые 200 ms отказались.
 
-Причина: Fn+Space меняет EC KBBL напрямую, минуя LED-class write path.
+Оставляем простую схему без периодического polling:
+- KDE slider управляет honor::kbd_backlight и физической подсветкой;
+- sysfs 0/1/2 управляет физической подсветкой;
+- Fn+Space отдельно переключает подсветку через firmware/EC;
+- slider KDE может не отражать уровень, изменённый только Fn+Space.
 
-Новая версия honor_zqcp_kbdlight:
-- опрашивает KBBL раз в 200 ms;
-- распознаёт hardware off/low/high;
-- обновляет logical LED brightness;
-- включает LED_BRIGHT_HW_CHANGED;
-- вызывает led_classdev_notify_brightness_hw_changed() при hardware change;
-- поэтому UPower/PowerDevil получают событие и могут обновить KDE slider.
+Причина: визуальная синхронизация slider не стоит постоянного периодического
+опроса EC. Если позже появится чистый event-driven путь по firmware/WMI event,
+синхронизацию можно сделать без polling.
 
-Installer также теперь:
-- пересобирает .ko, если source новее существующего module даже при том же kernel;
-- ставит modules_object_t на новый .ko;
-- restart'ит service, чтобы новая версия реально загрузилась.
-
-Устанавливаем свежую версию:
-
-rm -rf /tmp/my-dotfiles
-git clone --depth 1 https://github.com/pluseight8/my-dotfiles.git /tmp/my-dotfiles
-sudo bash /tmp/my-dotfiles/honor-zqcp-kbdlight/install-bazzite.sh
-
-После installer:
-
-sudo systemctl restart upower.service
-systemctl --user restart plasma-powerdevil.service
-
-Проверяем, что kernel LED поддерживает hardware-change notifications:
-
-ls -l /sys/class/leds/honor::kbd_backlight/brightness_hw_changed
-
-Смотрим logical brightness вживую:
-
-watch -n 0.2 cat /sys/class/leds/honor::kbd_backlight/brightness
-
-Теперь нажимаем Fn+Space несколько раз.
-Ожидаем, что значение в watch меняется вместе с физической подсветкой:
-
-0 -> 1 -> 2 -> ...
-
-Выход из watch: Ctrl+C.
-
-После этого проверяем KDE slider:
-- Fn+Space должен менять физическую подсветку;
-- KDE slider должен подтягивать тот же уровень;
-- изменение slider должно по-прежнему менять физическую подсветку.
-
-Если sysfs brightness синхронизируется с Fn+Space, но KDE slider визуально не
-двигается, собираем:
-
-busctl monitor org.freedesktop.UPower
-
-и в другом terminal нажимаем Fn+Space 2-3 раза. Для остановки monitor: Ctrl+C.
+Актуальный honor_zqcp_kbdlight driver polling не выполняет.
 
 ======================================================================
 ОЖИДАЕМЫЙ ИТОГ
