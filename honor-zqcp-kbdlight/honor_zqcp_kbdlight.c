@@ -49,6 +49,7 @@ static enum led_brightness cur_bright = 1;
 static struct delayed_work latch_work;
 static struct delayed_work sync_work;
 static struct platform_device *pdev;
+static struct led_classdev kbd_led;
 
 static bool kbbl_to_level(u8 raw, enum led_brightness *b)
 {
