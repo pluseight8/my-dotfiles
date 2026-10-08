@@ -62,7 +62,11 @@ mkdir -p "$OUT"
 NEED_BUILD=1
 if [[ -f "$KO" ]]; then
     VM="$(modinfo -F vermagic "$KO" 2>/dev/null | awk '{print $1}' || true)"
-    [[ "$VM" == "$KVER" ]] && NEED_BUILD=0
+    if [[ "$VM" == "$KVER" \
+       && ! "$SRC/honor_zqcp_kbdlight.c" -nt "$KO" \
+       && ! "$SRC/Makefile" -nt "$KO" ]]; then
+        NEED_BUILD=0
+    fi
 fi
 
 if (( NEED_BUILD )); then
@@ -113,7 +117,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now honor-zqcp-kbdlight.service
+systemctl enable honor-zqcp-kbdlight.service
+systemctl restart honor-zqcp-kbdlight.service
 
 systemctl try-restart upower.service >/dev/null 2>&1 || true
 
