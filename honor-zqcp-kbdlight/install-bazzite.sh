@@ -74,6 +74,16 @@ if (( NEED_BUILD )); then
     install -m644 "$BUILD/honor_zqcp_kbdlight.ko" "$KO"
 fi
 
+# Fedora/Bazzite SELinux: systemd_t may only load kernel modules carrying
+# modules_object_t. Files created under /var/lib would otherwise inherit
+# var_lib_t and insmod from the systemd service is denied with AVC module_load.
+if command -v chcon >/dev/null 2>&1; then
+    chcon -t modules_object_t "$KO" || {
+        echo "HONOR kbdlight: failed to set SELinux module label on $KO" >&2
+        exit 1
+    }
+fi
+
 if ! grep -q '^honor_zqcp_kbdlight ' /proc/modules 2>/dev/null; then
     insmod "$KO"
 fi
