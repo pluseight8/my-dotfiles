@@ -1702,6 +1702,59 @@ chcon подтверждает/fixes проблему прямо сейчас, �
 rebuild helper должен сам ставить корректный SELinux type на новый .ko.
 
 ======================================================================
+ПОДТВЕРЖДЕНО: REFERENCE KERNEL MODULE ИМЕЕТ modules_object_t
+======================================================================
+
+На M1230/Bazzite проверено: обычный kernel module из
+/lib/modules/$(uname -r) имеет SELinux type:
+
+system_u:object_r:modules_object_t:s0
+
+Значит honor_zqcp_kbdlight.ko под /var/lib/honor должен получить тот же type.
+
+Применяем к уже собранному module tree:
+
+sudo chcon -R -t modules_object_t /var/lib/honor/kbdlight
+
+Проверяем конкретный .ko:
+
+ls -lZ /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko
+
+Если модуль сейчас загружен после ручного sudo insmod, выгружаем:
+
+sudo rmmod honor_zqcp_kbdlight 2>/dev/null || true
+
+Теперь запускаем именно systemd service:
+
+sudo systemctl restart honor-zqcp-kbdlight.service
+
+Проверяем:
+
+systemctl status honor-zqcp-kbdlight.service --no-pager -l
+lsmod | grep honor_zqcp || true
+ls -1 /sys/class/leds | grep -E 'honor|huawei|kbd' || true
+
+Если service active и honor::kbd_backlight присутствует, физический тест:
+
+echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+sleep 2
+echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+
+После успешного теста обновляем локальную установку installer'ом из my-dotfiles,
+потому что актуальный install-bazzite.sh теперь сам делает:
+
+chcon -t modules_object_t "$KO"
+
+после каждой сборки нового .ko. Это нужно, чтобы fix не сломался после будущего
+kernel update.
+
+Обновление установленного helper/service из GitHub:
+
+rm -rf /tmp/my-dotfiles
+git clone --depth 1 https://github.com/pluseight8/my-dotfiles.git /tmp/my-dotfiles
+sudo bash /tmp/my-dotfiles/honor-zqcp-kbdlight/install-bazzite.sh
+
+======================================================================
 ОЖИДАЕМЫЙ ИТОГ
 ======================================================================
 
