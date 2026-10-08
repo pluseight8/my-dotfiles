@@ -773,6 +773,7 @@ After=display-manager.service
 
 [Service]
 Type=oneshot
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
 ExecStart=/usr/local/lib/honor/force-dsc.sh
 RemainAfterExit=yes
 
@@ -2349,6 +2350,120 @@ Helper писал "not found", потому что его условие про�
 
 Следующий фикс должен быть узким SELinux-решением только для DSC helper/service,
 а не глобальным разрешением systemd писать в debugfs.
+
+======================================================================
+ФИНАЛЬНЫЙ FIX DSC: ЗАПУСКАЕМ ТОЛЬКО ЭТОТ ONESHOT В unconfined_service_t
+======================================================================
+
+Подтверждено AVC:
+- systemd unit работает в init_t;
+- i915_dsc_fec_support имеет debugfs_t;
+- SELinux запрещает init_t -> debugfs_t { write };
+- обычный sudo shell пишет туда успешно.
+
+Fedora SELinux policy содержит специальный domain unconfined_service_t именно
+для отдельных system services. Используем его ТОЛЬКО для honor-force-dsc.
+SELinux глобально остаётся Enforcing.
+
+Сначала убеждаемся, что type существует:
+
+seinfo -t unconfined_service_t 2>/dev/null || true
+
+Даже если seinfo не установлен, сам запуск service ниже является окончательной
+проверкой.
+
+Перезаписываем unit:
+
+sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
+[Unit]
+Description=Force DSC on HONOR ZQC-P internal eDP panel
+After=display-manager.service
+
+[Service]
+Type=oneshot
+SELinuxContext=system_u:system_r:unconfined_service_t:s0
+ExecStart=/usr/local/lib/honor/force-dsc.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical.target
+EOF
+
+Возвращаем helper к короткому boot-only ожиданию. Это НЕ постоянный polling:
+как только debugfs node доступен, helper пишет 1 и завершается.
+
+sudo tee /usr/local/lib/honor/force-dsc.sh >/dev/null <<'EOF'
+#!/usr/bin/bash
+set -euo pipefail
+
+mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug
+
+for _ in $(seq 1 150); do
+    DSC_FILE=$(find /sys/kernel/debug/dri       -path '*/eDP-*/i915_dsc_fec_support'       -print -quit 2>/dev/null || true)
+
+    if [[ -n "$DSC_FILE" ]]; then
+        if ! grep -q 'DSC_Sink_Support: yes' "$DSC_FILE"; then
+            echo "HONOR: panel does not report DSC support" >&2
+            exit 1
+        fi
+
+        echo 1 > "$DSC_FILE"
+        exit 0
+    fi
+
+    sleep 0.2
+done
+
+echo "HONOR: i915_dsc_fec_support not found" >&2
+exit 1
+EOF
+
+sudo chmod 755 /usr/local/lib/honor/force-dsc.sh
+
+Применяем:
+
+sudo systemctl daemon-reload
+sudo systemctl enable honor-force-dsc.service
+sudo systemctl restart honor-force-dsc.service
+
+Проверяем:
+
+systemctl status honor-force-dsc.service --no-pager -l
+
+DSC_FILE=$(sudo find /sys/kernel/debug/dri   -path '*/eDP-*/i915_dsc_fec_support'   -print -quit)
+
+sudo cat "$DSC_FILE" | grep -E   'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
+
+DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri   -name i915_display_info   -print -quit)
+
+sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
+
+Хотим:
+- honor-force-dsc.service = active (exited)
+- DSC_Enabled: yes
+- DSC_Sink_Support: yes
+- Force_DSC_Enable: yes
+- bpp=30
+- dither=no
+
+Проверяем SELinux context реально запущенного ExecStart по journal/audit:
+
+sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null   | grep -Ei 'force-dsc|i915_dsc_fec_support'   | tail -n 20 || true
+
+После успешного результата:
+
+systemctl reboot
+
+После reboot helper вручную НЕ запускать. Через ~45-60 секунд:
+
+cat /var/lib/honor/health-last.txt
+
+Если RESULT: OK — DSC persistence закрыта окончательно.
+
+Почему это лучше, чем audit2allow:
+мы не даём всем init_t services право писать в debugfs. Только этот один
+root-owned oneshot запускается в уже существующем Fedora domain
+unconfined_service_t.
 
 ======================================================================
 ОЖИДАЕМЫЙ ИТОГ
