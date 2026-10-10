@@ -22,6 +22,46 @@ require_cmds() {
     ((${#missing[@]} == 0)) || die "missing command(s): ${missing[*]}"
 }
 
+REQUIRED_HOST_PACKAGES=(
+    git
+    udev-hid-bpf
+    fprintd
+    fprintd-pam
+    authselect
+    gcc
+    make
+    mokutil
+    clang
+    bpftool
+    libbpf-devel
+    meson
+    ninja-build
+    pkgconf-pkg-config
+    glib2-devel
+    libgusb-devel
+    nss-devel
+    libgudev-devel
+    gobject-introspection-devel
+    cairo-devel
+    pixman-devel
+    polkit-devel
+    usbutils
+)
+
+assert_host_dependencies_present() {
+    require_cmds rpm
+    local missing=() pkg
+    for pkg in "${REQUIRED_HOST_PACKAGES[@]}"; do
+        rpm -q "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+    done
+
+    if ((${#missing[@]})); then
+        printf 'Missing host package(s):\n' >&2
+        printf '  %s\n' "${missing[@]}" >&2
+        die "install the dependencies manually with rpm-ostree, reboot, then run this installer again. See docs/INSTALL.md"
+    fi
+}
+
 is_bazzite() {
     [[ -r /etc/os-release ]] || return 1
     grep -qiE '(^ID=bazzite$|^NAME=.*Bazzite)' /etc/os-release
