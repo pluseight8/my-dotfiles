@@ -33,7 +33,8 @@ done
 require_root
 assert_bazzite
 assert_m1230
-require_cmds git python3 rpm-ostree systemctl md5sum install find awk grep flock
+require_cmds git python3 rpm rpm-ostree systemctl md5sum install find awk grep flock
+assert_host_dependencies_present
 
 if [[ "$ORIGINAL_ROOT" != "$HONOR_REPO_INSTALL_DIR" ]]; then
     log "copying installer payload to $HONOR_REPO_INSTALL_DIR"
@@ -255,7 +256,7 @@ stage2() {
     systemctl restart upower.service 2>/dev/null || true
     restart_powerdevil_for_user "$TARGET_USER"
 
-    log "keeping build dependencies for future repairability (optional cleanup is documented)"
+    log "host dependencies were installed manually before setup and are left untouched"
 
     state_set STAGE 3
     reboot_or_stop
