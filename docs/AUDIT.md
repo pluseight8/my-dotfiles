@@ -83,9 +83,10 @@ No `FORCE_ACPI=1` escape is used.
 ### BIOS update behavior — PASS WITH PROCEDURE
 
 A firmware update can invalidate the ACPI assumption before Linux has a chance
-to run the normal health check. `scripts/prepare-bios-update.sh` removes the
-override from the next deployment before flashing. After the BIOS update,
-`install.sh --repair` must revalidate the new live ACPI bytes.
+to run the normal health check. BIOS preparation is documented as explicit
+manual commands in `docs/BIOS-UPDATE.md`; there is no script that silently
+changes the next boot. After the BIOS update, `preflight.sh` must revalidate the
+new live ACPI bytes before the user manually restages the override.
 
 ### HID-BPF — PASS
 
@@ -130,12 +131,17 @@ Mutation scripts use `set -euo pipefail`, explicit gates, a single-install lock,
 root checks and fail-closed validation. Network-dependent hardware builds retry
 three times before stopping.
 
-### Reboot/resume — PASS
+### Reboot boundary — PASS
 
-A persistent systemd unit resumes only after network and display-manager
-ordering. The installer state is root-owned under `/var/lib/honor-m1230` and the
-final stage disables the resume unit only after a clean-boot health check passes.
+No executable script performs `systemctl reboot` and `install.sh` contains no
+`rpm-ostree` command at all.
 
+The dependency deployment is staged manually by the user. The ACPI/initramfs
+and PSR deployment is also staged manually after a non-mutating preflight. The
+user inspects `rpm-ostree status` before each reboot.
+
+`install.sh` is post-reboot/runtime-only. The final clean reboot is an explicit
+user action used only to prove persistence through the health-check timer.
 ### Destructive path handling — PASS
 
 There is no global `rpm-ostree reset`, no global SELinux disable and no raw
@@ -152,7 +158,7 @@ installer snippets have drifted.
 
 - `bash -n` over every shell script;
 - Python bytecode compilation for the adapter;
-- forbidden-pattern scan, including an assertion that executable scripts never run `rpm-ostree install`;
+- forbidden-pattern scan, including assertions that scripts never run `rpm-ostree install`, no script auto-reboots, and `install.sh` contains no `rpm-ostree` command;
 - pin/hash presence checks;
 - systemd DSC context/entrypoint checks;
 - keyboard-module DMI/no-poll checks;
