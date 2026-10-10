@@ -1,251 +1,202 @@
 BAZZITE — HONOR MAGICBOOK PRO 14 2026 AI (ZQC-P / M1230)
-ПОЛНЫЙ ГАЙД С НУЛЯ
-Обновлено: 2026-10-08
+ИДЕАЛЬНЫЙ ЧИСТЫЙ ГАЙД — ПРОВЕРЕНО НА РЕАЛЬНОМ НОУТБУКЕ
 
-Этот файл рассчитан на ситуацию:
-- Bazzite уже установлен;
-- ты находишься на рабочем столе;
-- Bazzite уже обновил;
-- НИ ОДНОЙ команды из старой инструкции ещё не вводил.
+Последняя проверенная конфигурация:
+- HONOR MagicBook Pro 14 2026 AI
+- product_name: ZQC-P
+- board_version: M1230
+- board_name: ZQC-P-PCB
+- Bazzite / Fedora 44
+- kernel, на котором всё было подтверждено: 7.2.8-ogc5.1.fc44.x86_64
+- KDE Plasma
+- Secure Boot: disabled
+- SELinux: Enforcing
 
-Делай СТРОГО сверху вниз. Блоки "ПРОВЕРКА" не пропускай.
-Все команды ниже рассчитаны на bash. В самом начале мы специально в него зайдём.
+После финального reboot health-check на реальном M1230 дал RESULT: OK.
 
-Что ставим:
-- ACPI override -> touchscreen + touchpad;
-- xe.enable_psr=1 -> PSR1 вместо проблемного PSR2;
-- HID-BPF micmute fix;
-- HID-BPF left-edge brightness;
-- EgisTec 1c7a:05aa fingerprint через SDCP libfprint;
-- принудительный DSC -> 10-bit / bpp=30 / dither=no;
-- автоматические boot-проверки после обновлений.
-
-Что НЕ будем делать:
-- никакого custom Bazzite image;
-- никакой пересборки ядра;
-- никакого самодельного xe.ko;
-- никакого apply_patch.sh целиком;
-- никакого i8042.dumbkbd=1.
-
-Исходники HONOR будем хранить здесь:
-
-/var/opt/honor-magicbook-linux
-
-То есть в HOME вообще ничего мозолить глаза не будет.
-
-
-======================================================================
-ШАГ 0. ПЕРЕХОДИМ В BASH И ПРОВЕРЯЕМ, ЧТО BAZZITE УЖЕ ЗАГРУЖЕН ПОСЛЕ UPDATE
-======================================================================
-
-Открой Terminal и введи:
-
-bash
-
-Теперь:
-
-uname -r
-rpm-ostree status
-cat /sys/class/dmi/id/product_name
-cat /sys/class/dmi/id/board_version
-
-Для ноутбука должно быть:
-
-ZQC-P
-M1230
+Что в итоге работает:
+- клавиатура;
+- touchscreen 2808:5662;
+- touchpad 27c6:0f9a;
+- левый край touchpad -> яркость;
+- правый край touchpad -> громкость;
+- исправлен phantom KEY_MICMUTE;
+- fingerprint EgisTec 1c7a:05aa;
+- KDE slider подсветки клавиатуры реально меняет подсветку;
+- Fn+Space по-прежнему меняет подсветку через firmware;
+- PSR1;
+- DSC;
+- 10-bit output: bpp=30;
+- dither=no;
+- автоматический health-check после boot;
+- фиксы переживают обычный Bazzite update настолько, насколько это возможно
+  без собственного custom image/kernel.
 
 ВАЖНО:
-Если rpm-ostree status показывает новый pending/staged deployment после твоего
-последнего обновления, СЕЙЧАС перезагрузись:
+- этот гайд только для ZQC-P / M1230;
+- не копировать его на другой HONOR вслепую;
+- BIOS update — отдельный риск: он может изменить ACPI/EC;
+- никаких i8042.dumbkbd=1;
+- никаких custom xe.ko;
+- никаких patch/edp-dsc/install.sh;
+- никаких patch/cdclk-ptl/install.sh;
+- SELinux НЕ выключаем.
 
-systemctl reboot
 
-После загрузки снова открой Terminal, введи:
+======================================================================
+0. СТАРТОВАЯ ПРОВЕРКА
+======================================================================
+
+Открой Konsole и войди в bash:
 
 bash
 
-и повтори:
+Проверь модель:
 
-rpm-ostree status
+cat /sys/class/dmi/id/sys_vendor
+cat /sys/class/dmi/id/product_name
+cat /sys/class/dmi/id/board_version
+cat /sys/class/dmi/id/board_name
 
-Дальше продолжай только когда текущий обновлённый deployment уже booted.
+Нужно увидеть:
 
+HONOR
+ZQC-P
+M1230
+ZQC-P-PCB
 
-======================================================================
-ШАГ 1. ДЕЛАЕМ ТОЧКУ ОТКАТА И ПРОВЕРЯЕМ LOCKDOWN
-======================================================================
+Проверь Secure Boot и lockdown:
 
-Сначала закрепляем текущий рабочий deployment:
+mokutil --sb-state || true
+cat /sys/kernel/security/lockdown 2>/dev/null || true
 
-sudo ostree admin pin 0
+Для этой схемы ожидаем:
 
-Проверяем kernel lockdown:
+SecureBoot disabled
 
-cat /sys/kernel/security/lockdown 2>/dev/null || echo "lockdown file not present"
-
-Если увидишь:
+и:
 
 [none]
 
-или файла вообще нет — хорошо, продолжаем.
+Если Secure Boot включён или lockdown не [none] — дальше не продолжай.
 
-Если квадратные скобки стоят на:
+Проверь, что сейчас загружен актуальный deployment:
 
-[integrity]
+rpm-ostree status
 
-или:
+Закрепи текущий рабочий deployment:
 
-[confidentiality]
-
-СТОП.
-
-ACPI override при kernel lockdown может быть проигнорирован. В таком случае:
-1. перезагрузи ноутбук;
-2. отключи Secure Boot в BIOS/UEFI;
-3. снова загрузи Bazzite;
-4. открой Terminal;
-5. введи bash;
-6. повтори этот шаг.
-
-Пока lockdown не будет выключен, дальше ACPI не ставим.
+sudo ostree admin pin 0
 
 
 ======================================================================
-ШАГ 2. СТАВИМ ВСЁ, ЧТО ПОНАДОБИТСЯ ДЛЯ СБОРКИ И РАБОТЫ ФИКСОВ
+1. СТАВИМ НУЖНЫЕ ПАКЕТЫ
 ======================================================================
 
-Сначала создаём постоянную папку состояния:
+Мы сознательно оставляем build tools установленными.
+Они не работают в фоне, зато пригодятся для будущей пересборки keyboard
+backlight module и ручного ремонта после большого kernel update.
 
-sudo mkdir -p /var/lib/honor
+Вставь блок:
 
-Теперь вставь ЦЕЛИКОМ этот блок:
+PKGS="git udev-hid-bpf fprintd fprintd-pam authselect clang bpftool libbpf-devel curl gcc make meson ninja-build pkgconf-pkg-config glib2-devel libgusb-devel nss-devel libgudev-devel gobject-introspection-devel cairo-devel pixman-devel polkit-devel usbutils"
 
-PERSIST=(
-  git
-  udev-hid-bpf
-  fprintd
-  fprintd-pam
-  authselect
-)
+MISSING=""
 
-TEMP=(
-  clang
-  bpftool
-  libbpf-devel
-  curl
-  gcc
-  make
-  meson
-  ninja-build
-  pkgconf-pkg-config
-  glib2-devel
-  libgusb-devel
-  nss-devel
-  libgudev-devel
-  gobject-introspection-devel
-  cairo-devel
-  pixman-devel
-  polkit-devel
-  usbutils
-)
-
-TO_INSTALL=()
-TEMP_MISSING=()
-
-for p in "${PERSIST[@]}"; do
-    rpm -q "$p" >/dev/null 2>&1 || TO_INSTALL+=("$p")
+for p in $PKGS; do
+    rpm -q "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
 done
 
-for p in "${TEMP[@]}"; do
-    if ! rpm -q "$p" >/dev/null 2>&1; then
-        TO_INSTALL+=("$p")
-        TEMP_MISSING+=("$p")
-    fi
-done
-
-if (( ${#TEMP_MISSING[@]} )); then
-    printf '%s\n' "${TEMP_MISSING[@]}" | sudo tee /var/lib/honor/temp-layered.txt >/dev/null
+if [ -n "$MISSING" ]; then
+    echo "Adding:$MISSING"
+    sudo rpm-ostree install $MISSING
 else
-    sudo truncate -s0 /var/lib/honor/temp-layered.txt
+    echo "All required packages are already present."
 fi
 
-printf 'Будут добавлены:'
-printf ' %s' "${TO_INSTALL[@]}"
-printf '\n'
-
-if (( ${#TO_INSTALL[@]} )); then
-    sudo rpm-ostree install "${TO_INSTALL[@]}"
-else
-    echo "Все нужные пакеты уже есть."
-fi
-
-Посмотри новый deployment:
-
-rpm-ostree status -v
-
-Теперь перезагрузка:
+Теперь reboot:
 
 systemctl reboot
 
 
 ======================================================================
-ШАГ 3. ПОСЛЕ REBOOT ПРОВЕРЯЕМ И КЛОНИРУЕМ HONOR-РЕПО В /var/opt
+2. ПРОВЕРЯЕМ BUILD TREE ТЕКУЩЕГО OGC KERNEL
 ======================================================================
 
 После загрузки:
 
 bash
 
-Проверяем инструменты:
+Проверь:
 
-command -v git
-command -v clang
-command -v bpftool
-command -v udev-hid-bpf
-command -v meson
-command -v ninja
-command -v fprintd-enroll
+uname -r
+ls -ld /lib/modules/"$(uname -r)"/build
+test -f /lib/modules/"$(uname -r)"/build/Makefile && echo "kernel build tree: OK"
 
-Каждая команда должна вывести путь.
+Последняя строка обязана быть:
 
-Теперь создаём место под репозиторий:
+kernel build tree: OK
+
+Если build tree отсутствует — СТОП.
+Не ставь случайный Fedora kernel-devel: он должен точно соответствовать
+текущему Bazzite OGC kernel.
+
+
+======================================================================
+3. КЛОНИРУЕМ HONOR UPSTREAM В /var/opt
+======================================================================
+
+Проверяем, что старой копии нет:
+
+if [ -e /var/opt/honor-magicbook-linux ]; then
+    echo "STOP: /var/opt/honor-magicbook-linux already exists"
+else
+    echo "OK: path is free"
+fi
+
+Если был STOP — сначала разберись со старой копией.
+Если path свободен:
 
 sudo mkdir -p /var/opt
 
-Клонируем:
-
-sudo git clone \
-  https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010.git \
-  /var/opt/honor-magicbook-linux
-
-Отдаём репозиторий твоему пользователю:
+sudo git clone   https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010.git   /var/opt/honor-magicbook-linux
 
 sudo chown -R "$USER:$(id -gn)" /var/opt/honor-magicbook-linux
 
-Переходим туда:
-
 cd /var/opt/honor-magicbook-linux
-
-Проверка:
 
 git status
 git remote -v
 
-Должен быть чистый main и origin на rs0x29a.
-
 
 ======================================================================
-ШАГ 4. ДОБАВЛЯЕМ НАШ M1230 КАК ОТДЕЛЬНЫЙ ЛОКАЛЬНЫЙ COMMIT
+4. ДОБАВЛЯЕМ M1230 + ДВЕ BAZZITE-АДАПТАЦИИ
 ======================================================================
 
-Создаём отдельную ветку:
+Создаём локальную ветку:
 
-git switch -c m1230-bazzite
+if git show-ref --verify --quiet refs/heads/m1230-bazzite; then
+    git switch m1230-bazzite
+else
+    git switch -c m1230-bazzite
+fi
 
-Добавляем профиль:
+Теперь вставь один Python-блок. Он:
+- добавит M1230 profile;
+- добавит recipes;
+- переделает fingerprint install под immutable /usr;
+- уберёт ложную проверку touchpad-edge через устаревший list-loaded.
 
-cat >> devices/zqc-p.conf <<'EOF'
+python3 - <<'PY'
+from pathlib import Path
 
+root = Path(".")
+
+# ---------- M1230 profile ----------
+profile = root / "devices/zqc-p.conf"
+text = profile.read_text()
+
+board = """
 [board M1230]
 status=probed
 origin=local M1230 hardware observation
@@ -262,349 +213,27 @@ camera_usb=30c9:012c
 panel=oled
 backlight_max=704
 fixes=acpi-override psr-band micmute touchpad-edge fingerprint
-EOF
-
-Создаём M1230 recipe:
-
-mkdir -p \
-  patch/acpi-override/zqc-p/M1230 \
-  patch/psr-band/zqc-p/M1230 \
-  patch/micmute/zqc-p/M1230 \
-  patch/touchpad-edge/zqc-p/M1230 \
-  patch/fingerprint/zqc-p/M1230
-
-echo 'same_as=zqc-p/M1010' > patch/acpi-override/zqc-p/M1230/recipe.conf
-echo 'same_as=zqc-p/M1010' > patch/psr-band/zqc-p/M1230/recipe.conf
-echo 'same_as=zqc-p/M1010' > patch/micmute/zqc-p/M1230/recipe.conf
-echo 'same_as=zqc-p/M1010' > patch/touchpad-edge/zqc-p/M1230/recipe.conf
-echo 'same_as=zqc-p/M1050' > patch/fingerprint/zqc-p/M1230/recipe.conf
-
-Почему:
-- touchscreen M1230 = 2808:5662, как M1010;
-- touchpad M1230 = 27c6:0f9a, как M1010;
-- fingerprint M1230 = 1c7a:05aa, как M1050;
-- ACPI всё равно проверяется ПО БАЙТАМ через md5 до установки.
-
-Проверяем изменения:
-
-git diff -- devices/zqc-p.conf
-find patch -path '*/M1230/recipe.conf' -print -exec cat {} \;
-
-Теперь фиксируем наши изменения отдельным commit:
-
-git config user.name "HONOR M1230 local"
-git config user.email "honor-m1230@localhost"
-
-git add \
-  devices/zqc-p.conf \
-  patch/acpi-override/zqc-p/M1230/recipe.conf \
-  patch/psr-band/zqc-p/M1230/recipe.conf \
-  patch/micmute/zqc-p/M1230/recipe.conf \
-  patch/touchpad-edge/zqc-p/M1230/recipe.conf \
-  patch/fingerprint/zqc-p/M1230/recipe.conf
-
-git commit -m "local: add ZQC-P M1230 profile"
-
-ПРОВЕРКА:
-
-git status
-git log --oneline -3
-
-git status должен показать clean working tree.
-
-
-======================================================================
-ШАГ 5. ПРОВЕРЯЕМ ACPI I2C_DEVT. ЭТО ОБЯЗАТЕЛЬНЫЙ SAFETY CHECK
-======================================================================
-
-Мы НЕ копируем AML вслепую.
-
-Остаёмся здесь:
-
-cd /var/opt/honor-magicbook-linux
-
-Вставь блок:
-
-LIVE=""
-
-for f in /sys/firmware/acpi/tables/SSDT*; do
-    OEM=$(sudo dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\0 ')
-
-    if [[ "$OEM" == "I2C_DEVT" ]]; then
-        LIVE="$f"
-        break
-    fi
-done
-
-if [[ -z "$LIVE" ]]; then
-    echo "STOP: I2C_DEVT не найдена. НЕ продолжай со следующим шагом."
-else
-    LIVE_MD5=$(sudo md5sum "$LIVE" | awk '{print $1}')
-    REF_MD5=$(md5sum dump/acpi/zqc-p/SSDT27_orig.aml | awk '{print $1}')
-
-    echo "LIVE TABLE: $LIVE"
-    echo "LIVE MD5 : $LIVE_MD5"
-    echo "REPO MD5 : $REF_MD5"
-
-    if [[ "$LIVE_MD5" == "$REF_MD5" ]]; then
-        echo "OK: заводская I2C_DEVT полностью совпадает с reference."
-    else
-        echo "STOP: таблицы отличаются. AML НЕ устанавливаем и дальше НЕ продолжай."
-    fi
-fi
-
-Только если в конце было OK — продолжаем.
-
-
-======================================================================
-ШАГ 6. СТАВИМ ACPI OVERRIDE ЧЕРЕЗ DRACUT
-======================================================================
-
-Создаём отдельную постоянную папку:
-
-sudo install -d -m755 /etc/honor-magicbook/acpi
-
-Копируем уже готовую patched AML:
-
-sudo install -m644 \
-  patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml \
-  /etc/honor-magicbook/acpi/SSDT27_TPD0.aml
-
-Создаём dracut config:
-
-sudo tee /etc/dracut.conf.d/90-honor-acpi.conf >/dev/null <<'EOF'
-acpi_override="yes"
-acpi_table_dir="/etc/honor-magicbook/acpi"
-EOF
-
-ПРОВЕРКА:
-
-cat /etc/dracut.conf.d/90-honor-acpi.conf
-sudo md5sum /etc/honor-magicbook/acpi/SSDT27_TPD0.aml
-
-
-======================================================================
-ШАГ 7. ОГРАНИЧИВАЕМ PSR ДО PSR1
-======================================================================
-
-Смотрим текущие kargs:
-
-rpm-ostree kargs
-
-Удаляем только старые xe.enable_psr, если вдруг они уже есть:
-
-for arg in $(rpm-ostree kargs); do
-    case "$arg" in
-        xe.enable_psr=*)
-            if [[ "$arg" != "xe.enable_psr=1" ]]; then
-                sudo rpm-ostree kargs --delete="$arg"
-            fi
-            ;;
-    esac
-done
-
-Добавляем нужный аргумент:
-
-sudo rpm-ostree kargs --append-if-missing="xe.enable_psr=1"
-
-ПРОВЕРКА:
-
-rpm-ostree kargs | tr ' ' '\n' | grep 'xe.enable_psr'
-
-Должно остаться:
-
-xe.enable_psr=1
-
-НИКОГДА не добавляем:
-
-i8042.dumbkbd=1
-
-Для нашего 7.2+ kernel нужный keyboard quirk уже upstream.
-
-
-======================================================================
-ШАГ 8. ВКЛЮЧАЕМ LOCAL INITRAMFS И ПЕРЕЗАГРУЖАЕМСЯ
-======================================================================
-
-Это нужно именно ради ACPI override.
-
-sudo rpm-ostree initramfs --enable
-
-Посмотри deployment:
-
-rpm-ostree status -v
-
-Теперь:
-
-systemctl reboot
-
-
-======================================================================
-ШАГ 9. ПРОВЕРЯЕМ ACPI, TOUCHSCREEN, TOUCHPAD И PSR
-======================================================================
-
-После загрузки:
-
-bash
-
-ACPI:
-
-sudo journalctl -k -b | grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL|locked down'
-
-Хороший результат:
-- есть Table Upgrade / override для HONOR I2C_DEVT;
-- НЕТ AE_AML_INTERNAL;
-- НЕТ "locked down, ignoring table override".
-
-Проверяем HID:
-
-ls /sys/bus/hid/devices/ | grep -iE '2808:5662|27C6:0F9A'
-
-Нужно увидеть:
-- 2808:5662 — FocalTech touchscreen;
-- 27c6:0f9a — Goodix touchpad.
-
-Проверяем PSR parameter:
-
-cat /sys/module/xe/parameters/enable_psr
-
-Нужно:
-
-1
-
-Если ACPI не загрузился или touchscreen/touchpad отсутствуют — НЕ ИДИ ДАЛЬШЕ.
-Сначала разбирай эту ошибку.
-
-
-======================================================================
-ШАГ 10. СТАВИМ MICMUTE HID-BPF
-======================================================================
-
-cd /var/opt/honor-magicbook-linux
-
-sudo ALLOW_UNVERIFIED=1 bash patch/micmute/install.sh
-
-Если installer падает с:
-could not fetch drivers/hid/bpf/progs/hid_bpf.h at v7.2.8
-
-сначала проверь доступ к официальному stable header:
-
-curl -fL --retry 5 --retry-all-errors --retry-delay 2 \
-https://raw.githubusercontent.com/gregkh/linux/v7.2.8/drivers/hid/bpf/progs/hid_bpf.h \
--o /tmp/hid_bpf.h && echo "OK" && wc -c /tmp/hid_bpf.h
-
-Этот hid_bpf.h сверялся с OpenGamingCollective/linux v7.2.8-ogc5:
-содержимое совпадает байт-в-байт, Git blob SHA
-7cabd1b2e8371e9bdac39d0279fd62b78f6dcc44
-
-После окончания installer сам должен написать:
-
-phantom KEY_MICMUTE device is gone.
-
-Проверяем, что объект установлен:
-
-test -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o && echo "micmute BPF object: OK"
-
-Проверяем service:
-
-systemctl is-active honor-hid-bpf-reapply.service
-
-udev-hid-bpf list-devices показывает HID-устройства, а не список загруженных BPF-программ.
-
-Проверяем фантомный input device:
-
-grep -l UNKNOWN /sys/class/input/input*/name 2>/dev/null | \
-  xargs -r grep -H 2808
-
-Эта команда должна вывести НИЧЕГО.
-
-Проверяем boot service:
-
-systemctl status honor-hid-bpf-reapply.service --no-pager
-
-Он нужен, чтобы micmute fix заново цеплялся при каждой загрузке.
-
-
-======================================================================
-ШАГ 11. СТАВИМ LEFT-EDGE BRIGHTNESS НА TOUCHPAD
-======================================================================
-
-cd /var/opt/honor-magicbook-linux
-
-sudo ALLOW_UNVERIFIED=1 bash patch/touchpad-edge/install.sh
-
-ВАЖНО ДЛЯ ТЕКУЩЕГО BAZZITE:
-upstream installer в конце проверяет attach через старую команду
-"udev-hid-bpf list-loaded". В текущем Bazzite этой подкоманды уже нет, поэтому
-installer может закончиться ложной ошибкой:
-
-the program is not attached to the device
-
-Если перед этим уже было:
-- building honor-tops0102-edge.bpf.o
-- installing to /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o
-- attaching to 0018:27C6:0F9A....
-
-то объект уже собран и установлен. Просто делаем ручной attach новой CLI:
-
-DEV=$(find /sys/bus/hid/devices -maxdepth 1 -name '*27C6:0F9A*' -print -quit)
-echo "$DEV"
-
-sudo udev-hid-bpf remove "$DEV" 2>/dev/null || true
-sudo udev-hid-bpf add "$DEV" /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o
-
-Проверка установленного объекта:
-
-test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o && echo "touchpad-edge BPF object: OK"
-
-Теперь попробуй провести пальцем по левому краю тачпада.
-
-Должно быть:
-- левый край -> яркость;
-- правый край -> громкость.
-
-Правый край отдельно не патчим: он уже приходит через EC.
-
-
-======================================================================
-ШАГ 12. СТАВИМ FINGERPRINT EGISTEC 1c7a:05aa
-======================================================================
-
-Проверяем USB reader:
-
-lsusb -d 1c7a:05aa
-
-Если строка есть — продолжаем.
-
-Если НИЧЕГО нет:
-1. выключи ноутбук ПОЛНОСТЬЮ;
-2. подожди 15-20 секунд;
-3. включи;
-4. снова открой Terminal -> bash;
-5. повтори lsusb -d 1c7a:05aa.
-
-Теперь:
-
-cd /var/opt/honor-magicbook-linux
-
-sudo ALLOW_UNVERIFIED=1 bash patch/fingerprint/install.sh
-
-ВАЖНО ДЛЯ BAZZITE:
-если build проходит, но install падает с:
-
-OSError: [Errno 30] Read-only file system: '/usr/lib/udev/rules.d/70-libfprint-2.rules'
-install failed
-
-это не ошибка fingerprint patch. Bazzite держит /usr read-only, а upstream
-libfprint пытается поставить udev rule именно туда.
-
-Исправляем local installer один раз так:
-
-python3 - <<'PY'
-from pathlib import Path
-
-p = Path("patch/fingerprint/install.sh")
-s = p.read_text()
+"""
+
+if "[board M1230]" not in text:
+    profile.write_text(text.rstrip() + "\n\n" + board.strip() + "\n")
+
+recipes = {
+    "patch/acpi-override/zqc-p/M1230/recipe.conf": "same_as=zqc-p/M1010\n",
+    "patch/psr-band/zqc-p/M1230/recipe.conf": "same_as=zqc-p/M1010\n",
+    "patch/micmute/zqc-p/M1230/recipe.conf": "same_as=zqc-p/M1010\n",
+    "patch/touchpad-edge/zqc-p/M1230/recipe.conf": "same_as=zqc-p/M1010\n",
+    "patch/fingerprint/zqc-p/M1230/recipe.conf": "same_as=zqc-p/M1050\n",
+}
+
+for name, data in recipes.items():
+    p = root / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(data)
+
+# ---------- fingerprint: stage install because Bazzite /usr is read-only ----------
+fp = root / "patch/fingerprint/install.sh"
+text = fp.read_text()
 
 old = '''    ninja -C "$GITDIR/build" >/dev/null || die "build failed"
     ninja -C "$GITDIR/build" install >/dev/null || die "install failed"
@@ -612,121 +241,373 @@ old = '''    ninja -C "$GITDIR/build" >/dev/null || die "build failed"
 
 new = '''    ninja -C "$GITDIR/build" >/dev/null || die "build failed"
 
-    # Bazzite/Fedora Atomic: /usr is read-only. Stage the Meson install first,
-    # then copy the private /opt prefix and place the generated udev rule in /etc.
-    STAGE="${WORK}/stage"
+    # Bazzite/Fedora Atomic: /usr is read-only.
+    STAGE="$WORK/stage"
     mkdir -p "$STAGE"
     DESTDIR="$STAGE" ninja -C "$GITDIR/build" install >/dev/null \
         || die "staged install failed"
 
     rm -rf "$PREFIX"
-    [[ -d "$STAGE$PREFIX" ]] \
+    [ -d "$STAGE$PREFIX" ] \
         || die "staged prefix missing: $STAGE$PREFIX"
     install -d "$(dirname "$PREFIX")"
     cp -a "$STAGE$PREFIX" "$PREFIX"
 
     UDEV_RULE="$STAGE/usr/lib/udev/rules.d/70-libfprint-2.rules"
-    if [[ -f "$UDEV_RULE" ]]; then
+    if [ -f "$UDEV_RULE" ]; then
         install -Dm644 "$UDEV_RULE" /etc/udev/rules.d/70-libfprint-2.rules
         udevadm control --reload
         udevadm trigger --subsystem-match=usb --action=add 2>/dev/null || true
     fi
+
     restorecon -RF "$PREFIX" /etc/udev/rules.d/70-libfprint-2.rules \
         >/dev/null 2>&1 || true
 '''
 
-if old not in s:
-    raise SystemExit("STOP: expected installer block not found; do not patch blindly")
+if old in text:
+    fp.write_text(text.replace(old, new, 1))
+elif "staged install failed" not in text:
+    raise SystemExit("STOP: fingerprint installer changed upstream; inspect manually")
 
-p.write_text(s.replace(old, new, 1))
-print("OK: fingerprint installer adapted for Bazzite read-only /usr")
+# ---------- touchpad-edge: current udev-hid-bpf has no list-loaded ----------
+tp = root / "patch/touchpad-edge/install.sh"
+text = tp.read_text()
+
+old = '''log "attaching to ${DEV##*/}"
+udev-hid-bpf remove "$DEV" >/dev/null 2>&1 || true
+sleep 1
+udev-hid-bpf add "$DEV" "${INSTALL_DIR}/${OBJ_NAME}" >/dev/null 2>&1 || true
+
+edge_attached() { udev-hid-bpf list-loaded 2>/dev/null | grep -q "$PROG_TAG"; }
+gate_wait_until 10 edge_attached \
+    || die "the program is not attached to the device"
+
+log "attached"
+'''
+
+new = '''log "attaching to ${DEV##*/}"
+udev-hid-bpf remove "$DEV" >/dev/null 2>&1 || true
+sleep 1
+
+udev-hid-bpf add "$DEV" "${INSTALL_DIR}/${OBJ_NAME}" >/dev/null \
+    || die "udev-hid-bpf add failed"
+
+log "attached"
+'''
+
+if old in text:
+    tp.write_text(text.replace(old, new, 1))
+elif "udev-hid-bpf add failed" not in text:
+    raise SystemExit("STOP: touchpad-edge installer changed upstream; inspect manually")
+
+print("M1230 + Bazzite adaptations: OK")
 PY
 
-Фиксируем эту Bazzite-адаптацию в нашей local branch:
+Фиксируем всё одним локальным commit:
 
-git add patch/fingerprint/install.sh
-git commit -m "local: stage libfprint install for Bazzite"
+git config user.name "HONOR M1230 local"
+git config user.email "honor-m1230@localhost"
 
-И повторяем:
+git add   devices/zqc-p.conf   patch/acpi-override/zqc-p/M1230/recipe.conf   patch/psr-band/zqc-p/M1230/recipe.conf   patch/micmute/zqc-p/M1230/recipe.conf   patch/touchpad-edge/zqc-p/M1230/recipe.conf   patch/fingerprint/zqc-p/M1230/recipe.conf   patch/fingerprint/install.sh   patch/touchpad-edge/install.sh
 
-sudo ALLOW_UNVERIFIED=1 bash patch/fingerprint/install.sh
+if ! git diff --cached --quiet; then
+    git commit -m "local: add M1230 Bazzite support"
+else
+    echo "Nothing new to commit."
+fi
 
-Для M1230 наш recipe отправит installer на вариант M1050:
-- EgisTec ET171;
-- USB 1c7a:05aa;
-- libfprint feature/sdcp-v2;
-- private prefix /opt/honor-libfprint-sdcp.
+Проверка:
 
-После успешной сборки:
+git status
+git log --oneline -3
+
+Working tree должен быть clean.
+
+
+======================================================================
+5. ACPI SAFETY CHECK — НИЧЕГО НЕ КОПИРУЕМ ВСЛЕПУЮ
+======================================================================
+
+Остаёмся:
+
+cd /var/opt/honor-magicbook-linux
+
+Ищем live I2C_DEVT и сравниваем ПО БАЙТАМ с reference:
+
+LIVE=""
+
+for f in /sys/firmware/acpi/tables/SSDT*; do
+    OEM=$(sudo dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\0 ')
+    if [ "$OEM" = "I2C_DEVT" ]; then
+        LIVE="$f"
+        break
+    fi
+done
+
+echo "LIVE=$LIVE"
+
+if [ -z "$LIVE" ]; then
+    echo "STOP: I2C_DEVT not found"
+else
+    LIVE_MD5=$(sudo md5sum "$LIVE" | awk '{print $1}')
+    REF_MD5=$(md5sum dump/acpi/zqc-p/SSDT27_orig.aml | awk '{print $1}')
+
+    echo "LIVE MD5: $LIVE_MD5"
+    echo "REF  MD5: $REF_MD5"
+
+    if [ "$LIVE_MD5" = "$REF_MD5" ]; then
+        echo "ACPI reference: EXACT MATCH"
+    else
+        echo "STOP: ACPI table differs. Do not install override."
+    fi
+fi
+
+На проверенном M1230 live/reference MD5 был:
+
+27bb4879b5af49ac2b613a73cf1ffa0b
+
+Но ориентируйся не на текст гайда, а именно на совпадение LIVE_MD5 == REF_MD5.
+
+
+======================================================================
+6. СТАВИМ ACPI OVERRIDE + PSR1
+======================================================================
+
+ТОЛЬКО если предыдущий шаг дал EXACT MATCH:
+
+sudo install -d -m755 /etc/honor-magicbook/acpi
+
+sudo install -m644   patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml   /etc/honor-magicbook/acpi/SSDT27_TPD0.aml
+
+sudo tee /etc/dracut.conf.d/90-honor-acpi.conf >/dev/null <<'EOF'
+acpi_override="yes"
+acpi_table_dir="/etc/honor-magicbook/acpi"
+EOF
+
+Включаем local initramfs:
+
+sudo rpm-ostree initramfs --enable
+
+Оставляем только xe.enable_psr=1:
+
+for arg in $(rpm-ostree kargs); do
+    case "$arg" in
+        xe.enable_psr=*)
+            if [ "$arg" != "xe.enable_psr=1" ]; then
+                sudo rpm-ostree kargs --delete="$arg"
+            fi
+            ;;
+    esac
+done
+
+sudo rpm-ostree kargs --append-if-missing="xe.enable_psr=1"
+
+Проверка:
+
+rpm-ostree kargs | tr ' ' '\n' | grep xe.enable_psr
+sudo md5sum /etc/honor-magicbook/acpi/SSDT27_TPD0.aml
+
+Reboot:
+
+systemctl reboot
+
+
+======================================================================
+7. ПОСЛЕ REBOOT ПРОВЕРЯЕМ ACPI / TOUCH / PSR
+======================================================================
+
+bash
+
+Проверь ACPI:
+
+sudo journalctl -k -b --no-pager |   grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL|locked down'
+
+Хорошо:
+- есть Table Upgrade / override для HONOR I2C_DEVT;
+- нет AE_AML_INTERNAL;
+- нет "locked down, ignoring table override".
+
+Проверь HID:
+
+ls /sys/bus/hid/devices | grep -iE '2808:5662|27C6:0F9A'
+
+Нужно увидеть touchscreen и touchpad.
+
+Проверь PSR:
+
+cat /sys/module/xe/parameters/enable_psr
+
+Нужно:
+
+1
+
+Если любой из этих трёх пунктов не сошёлся — дальше не продолжай.
+
+
+======================================================================
+8. MICMUTE HID-BPF
+======================================================================
+
+cd /var/opt/honor-magicbook-linux
+
+sudo env ALLOW_UNVERIFIED=1 HONOR_KSRC_REPO=gregkh/linux   bash patch/micmute/install.sh
+
+Успешный конец:
+
+phantom KEY_MICMUTE device is gone.
+
+Проверка:
+
+test -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o && echo "micmute object: OK"
+systemctl is-active honor-hid-bpf-reapply.service
+
+И:
+
+grep -l UNKNOWN /sys/class/input/input*/name 2>/dev/null |   xargs -r grep -H 2808
+
+Последняя команда должна вывести НИЧЕГО.
+
+
+======================================================================
+9. LEFT-EDGE BRIGHTNESS НА TOUCHPAD
+======================================================================
+
+cd /var/opt/honor-magicbook-linux
+
+sudo env ALLOW_UNVERIFIED=1 HONOR_KSRC_REPO=gregkh/linux   bash patch/touchpad-edge/install.sh
+
+Мы заранее исправили obsolete list-loaded check, поэтому ложной ошибки
+"the program is not attached" на текущем Bazzite быть не должно.
+
+Проверь объект:
+
+test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o && echo "touchpad-edge object: OK"
+
+Проверь руками:
+- проводишь по левому краю touchpad -> яркость;
+- по правому -> громкость.
+
+
+======================================================================
+10. FINGERPRINT EGISTEC 1c7a:05aa
+======================================================================
+
+Сначала:
+
+lsusb -d 1c7a:05aa
+
+Ожидаем EgisTec / LighTuning.
+
+Устанавливаем:
+
+cd /var/opt/honor-magicbook-linux
+
+sudo env ALLOW_UNVERIFIED=1 bash patch/fingerprint/install.sh
+
+Мы заранее переделали Meson install через DESTDIR, поэтому ошибки:
+
+Read-only file system: /usr/lib/udev/rules.d/70-libfprint-2.rules
+
+быть не должно.
+
+После installer:
 
 sudo ldconfig
 sudo systemctl restart fprintd
 
-Проверяем, что private libfprint попал в loader cache:
+Проверь loader cache:
 
 ldconfig -p | grep -i libfprint
 
-Теперь регистрируем указательный палец правой руки:
+Должен быть путь через:
+
+/opt/honor-libfprint-sdcp
+
+Enroll:
 
 fprintd-enroll -f right-index-finger
 
-После enrol:
+Verify:
 
 fprintd-verify
 
-Если verify успешен, включаем fingerprint в Fedora PAM:
+Если verify успешен:
 
 sudo authselect enable-feature with-fingerprint
-
-Проверка:
-
 sudo authselect check
 sudo authselect current
 
 
 ======================================================================
-ШАГ 13. ПРОВЕРЯЕМ DSC В ТЕКУЩЕМ OGC KERNEL
+11. КЛОНИРУЕМ НАШИ ПРОВЕРЕННЫЕ M1230 HELPER'Ы
 ======================================================================
 
-На текущем Bazzite OGC kernel CDCLK PTL fix уже присутствует.
-Отдельный patch/cdclk-ptl НЕ запускаем.
+Клонируем my-dotfiles отдельно:
 
-HONOR edp-dsc installer тоже НЕ запускаем.
-В OGC kernel есть writable debugfs switch для force DSC.
+if [ -e /var/opt/pluseight8-my-dotfiles ]; then
+    echo "STOP: /var/opt/pluseight8-my-dotfiles already exists"
+else
+    sudo git clone       https://github.com/pluseight8/my-dotfiles.git       /var/opt/pluseight8-my-dotfiles
 
-Сначала убеждаемся, что debugfs доступен:
-
-sudo mountpoint -q /sys/kernel/debug || sudo mount -t debugfs debugfs /sys/kernel/debug
-
-Находим DSC file:
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-echo "$DSC_FILE"
-
-Он НЕ должен быть пустым.
-
-Смотрим:
-
-sudo cat "$DSC_FILE"
-
-Нужно увидеть как минимум:
-
-DSC_Sink_Support: yes
-
-До force обычно будет:
-
-DSC_Enabled: no
-Force_DSC_Enable: no
-
-Если DSC_Sink_Support НЕ yes — СТОП, force не делаем.
+    sudo chown -R "$USER:$(id -gn)" /var/opt/pluseight8-my-dotfiles
+fi
 
 
 ======================================================================
-ШАГ 14. ДЕЛАЕМ DSC АВТОМАТИЧЕСКИМ ПРИ КАЖДОМ BOOT
+12. ПОДСВЕТКА КЛАВИАТУРЫ — РЕАЛЬНЫЙ KDE SLIDER
 ======================================================================
+
+Штатный huawei-wmi на ZQC-P создаёт slider, но физическую яркость через него
+не меняет.
+
+Ставим проверенный M1230 EC LED driver:
+
+sudo bash   /var/opt/pluseight8-my-dotfiles/honor-zqcp-kbdlight/install-bazzite.sh
+
+Проверка service:
+
+systemctl status honor-zqcp-kbdlight.service --no-pager -l
+
+Нужно:
+
+active (exited)
+
+Проверка LED:
+
+ls -ld /sys/class/leds/honor::kbd_backlight
+
+Прямой тест:
+
+echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+sleep 1
+echo 1 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+sleep 1
+echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
+
+Должно быть:
+off -> low -> high.
+
+Теперь обновляем userspace power stack:
+
+sudo systemctl restart upower.service
+systemctl --user restart plasma-powerdevil.service
+
+После этого KDE:
+Яркость и цвет -> Подсветка клавиатуры
+
+должен реально менять подсветку.
+
+Fn+Space тоже работает, но мы СПЕЦИАЛЬНО не синхронизируем его положение с
+KDE slider через постоянный EC polling. Это сделано ради отсутствия лишних
+периодических wakeups.
+
+
+======================================================================
+13. DSC / 10-BIT / DITHER=NO — ФИНАЛЬНЫЙ ПРОВЕРЕННЫЙ ВАРИАНТ
+======================================================================
+
+На текущем OGC kernel НЕ ставим custom xe.ko и НЕ запускаем upstream
+patch/edp-dsc/install.sh.
 
 Создаём helper:
 
@@ -738,33 +619,36 @@ set -euo pipefail
 
 mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug
 
-DEADLINE=$((SECONDS + 90))
+for _ in $(seq 1 150); do
+    DSC_FILE=$(find /sys/kernel/debug/dri       -path '*/eDP-*/i915_dsc_fec_support'       -print -quit 2>/dev/null || true)
 
-while (( SECONDS < DEADLINE )); do
-    DSC_FILE=$(find /sys/kernel/debug/dri \
-      -path '*/eDP-*/i915_dsc_fec_support' \
-      -print -quit 2>/dev/null || true)
-
-    if [[ -n "$DSC_FILE" && -w "$DSC_FILE" ]]; then
-        if ! grep -q 'DSC_Sink_Support: yes' "$DSC_FILE"; then
+    if [ -n "$DSC_FILE" ]; then
+        grep -q 'DSC_Sink_Support: yes' "$DSC_FILE" || {
             echo "HONOR: panel does not report DSC support" >&2
             exit 1
-        fi
+        }
 
         echo 1 > "$DSC_FILE"
         exit 0
     fi
 
-    sleep 0.5
+    sleep 0.2
 done
 
-echo "HONOR: i915_dsc_fec_support not found after 90s" >&2
+echo "HONOR: i915_dsc_fec_support not found" >&2
 exit 1
 EOF
 
 sudo chmod 755 /usr/local/lib/honor/force-dsc.sh
 
-Создаём service:
+Создаём service.
+
+КРИТИЧЕСКИ ВАЖНО:
+- After=display-manager.service;
+- SELinuxContext=unconfined_service_t;
+- ExecStart идёт через /usr/bin/bash.
+
+Именно эта комбинация была подтверждена после всех реальных ошибок SELinux.
 
 sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
 [Unit]
@@ -781,77 +665,50 @@ RemainAfterExit=yes
 WantedBy=graphical.target
 EOF
 
-Включаем:
+Применяем:
 
 sudo systemctl daemon-reload
 sudo systemctl enable honor-force-dsc.service
+sudo systemctl restart honor-force-dsc.service
 
-Пока reboot не делаем — сначала доделаем update protection.
+Проверяем service:
 
+systemctl status honor-force-dsc.service --no-pager -l
 
-======================================================================
-ШАГ 15. ДЕЛАЕМ БЕЗОПАСНОЕ ОБНОВЛЕНИЕ HONOR SOURCE TREE
-======================================================================
+Нужно:
 
-Сам source tree НЕ должен самовольно переустанавливать тебе фиксы.
-Он нужен только если когда-нибудь вручную захочешь обновить upstream.
+active (exited)
+status=0/SUCCESS
 
-НИКОГДА не делай в нём обычный git pull.
+Проверяем DSC:
 
-Создаём безопасный updater:
+DSC_FILE=$(sudo find /sys/kernel/debug/dri   -path '*/eDP-*/i915_dsc_fec_support'   -print -quit)
 
-sudo tee /usr/local/bin/honor-source-update >/dev/null <<'EOF'
-#!/usr/bin/bash
-set -euo pipefail
+sudo cat "$DSC_FILE" |   grep -E 'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
 
-REPO=/var/opt/honor-magicbook-linux
-cd "$REPO"
+Хотим:
 
-if [[ "$(git branch --show-current)" != "m1230-bazzite" ]]; then
-    echo "STOP: expected branch m1230-bazzite" >&2
-    exit 1
-fi
+DSC_Enabled: yes
+DSC_Sink_Support: yes
+Force_DSC_Enable: yes
 
-if [[ -n "$(git status --porcelain)" ]]; then
-    echo "STOP: working tree dirty. Ничего не обновляю." >&2
-    git status --short
-    exit 1
-fi
+Проверяем bpp:
 
-git branch -f honor-last-good HEAD
-git fetch --prune origin
+DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri   -name i915_display_info   -print -quit)
 
-if git rebase origin/main; then
-    echo
-    echo "HONOR source tree updated."
-    echo "ВАЖНО: установленные системные фиксы автоматически НЕ менялись."
-    echo "Новый installer запускай только вручную после проверки."
-else
-    echo
-    echo "Upstream конфликтует с нашим M1230 commit."
-    echo "Отменяю rebase и сохраняю старое рабочее состояние."
-    git rebase --abort || true
-    exit 1
-fi
-EOF
+sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
 
-sudo chmod 755 /usr/local/bin/honor-source-update
+Хотим:
 
-Проверка:
-
-command -v honor-source-update
-
-В БУДУЩЕМ исходники обновлять только так:
-
-honor-source-update
+bpp=30
+dither=no
 
 
 ======================================================================
-ШАГ 16. ДЕЛАЕМ HEALTH-CHECK ПОСЛЕ КАЖДОГО BOOT
+14. HEALTH-CHECK ПОСЛЕ КАЖДОГО BOOT
 ======================================================================
 
-Он ничего не патчит.
-Он только проверяет, не отъехали ли наши настройки после нового Bazzite deployment.
+Создаём:
 
 sudo tee /usr/local/lib/honor/health-check.sh >/dev/null <<'EOF'
 #!/usr/bin/bash
@@ -874,119 +731,93 @@ echo
 KLOG="$(journalctl -k -b --no-pager 2>/dev/null || true)"
 
 if grep -q 'AE_AML_INTERNAL' <<<"$KLOG"; then
-    bad "ACPI: AE_AML_INTERNAL вернулся"
+    bad "ACPI: AE_AML_INTERNAL returned"
 else
-    ok "ACPI: нет AE_AML_INTERNAL"
+    ok "ACPI: no AE_AML_INTERNAL"
 fi
 
-if ls /sys/bus/hid/devices/*2808:5662* >/dev/null 2>&1; then
+if compgen -G '/sys/bus/hid/devices/*2808:5662*' >/dev/null; then
     ok "touchscreen 2808:5662"
 else
-    bad "touchscreen 2808:5662 не найден"
+    bad "touchscreen 2808:5662 missing"
 fi
 
-if compgen -G '/sys/bus/hid/devices/*27C6:0F9A*' >/dev/null || \
-   compgen -G '/sys/bus/hid/devices/*27c6:0f9a*' >/dev/null; then
+if compgen -G '/sys/bus/hid/devices/*27C6:0F9A*' >/dev/null ||    compgen -G '/sys/bus/hid/devices/*27c6:0f9a*' >/dev/null; then
     ok "touchpad 27c6:0f9a"
 else
-    bad "touchpad 27c6:0f9a не найден"
+    bad "touchpad 27c6:0f9a missing"
 fi
 
 PSR="$(cat /sys/module/xe/parameters/enable_psr 2>/dev/null || true)"
-
-if [[ "$PSR" == "1" ]]; then
+if [ "$PSR" = "1" ]; then
     ok "xe.enable_psr=1"
 else
-    bad "xe.enable_psr=${PSR:-missing}"
+    bad "xe.enable_psr is not 1"
 fi
 
-if command -v udev-hid-bpf >/dev/null 2>&1; then
-    if [[ -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o ]]; then
-        ok "micmute HID-BPF object installed"
-    else
-        bad "micmute HID-BPF object отсутствует"
-    fi
+test -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o     && ok "micmute HID-BPF object installed"     || bad "micmute HID-BPF object missing"
 
-    if [[ -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o ]]; then
-        ok "touchpad-edge HID-BPF object installed"
-    else
-        bad "touchpad-edge HID-BPF object отсутствует"
-    fi
+test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o     && ok "touchpad-edge HID-BPF object installed"     || bad "touchpad-edge HID-BPF object missing"
 
-    if systemctl is-active --quiet honor-hid-bpf-reapply.service; then
-        ok "micmute re-apply service active"
-    else
-        bad "micmute re-apply service not active"
-    fi
-else
-    bad "udev-hid-bpf command отсутствует"
-fi
+systemctl is-active --quiet honor-hid-bpf-reapply.service     && ok "micmute re-apply service active"     || bad "micmute re-apply service not active"
 
 PHANTOM="$(
     grep -l UNKNOWN /sys/class/input/input*/name 2>/dev/null |
     xargs -r grep -H 2808 2>/dev/null || true
 )"
 
-if [[ -z "$PHANTOM" ]]; then
-    ok "phantom KEY_MICMUTE отсутствует"
+if [ -z "$PHANTOM" ]; then
+    ok "phantom KEY_MICMUTE absent"
 else
-    bad "phantom KEY_MICMUTE вернулся"
+    bad "phantom KEY_MICMUTE returned"
     echo "$PHANTOM"
 fi
 
-DSC_FILE="$(find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit 2>/dev/null || true)"
+systemctl is-active --quiet honor-zqcp-kbdlight.service     && ok "keyboard backlight service active"     || bad "keyboard backlight service not active"
 
-if [[ -n "$DSC_FILE" ]]; then
+test -d /sys/class/leds/honor::kbd_backlight     && ok "honor::kbd_backlight present"     || bad "honor::kbd_backlight missing"
+
+DSC_FILE="$(find /sys/kernel/debug/dri   -path '*/eDP-*/i915_dsc_fec_support'   -print -quit 2>/dev/null || true)"
+
+if [ -n "$DSC_FILE" ]; then
     DSC="$(cat "$DSC_FILE" 2>/dev/null || true)"
 
-    grep -q 'DSC_Sink_Support: yes' <<<"$DSC" \
-        && ok "DSC sink supported" \
-        || bad "DSC sink support отсутствует"
+    grep -q 'DSC_Sink_Support: yes' <<<"$DSC"         && ok "DSC sink supported"         || bad "DSC sink unsupported"
 
-    grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
-        && ok "DSC force enabled" \
-        || bad "DSC force не включился"
+    grep -q 'Force_DSC_Enable: yes' <<<"$DSC"         && ok "DSC force enabled"         || bad "DSC force not enabled"
 
-    if grep -q 'DSC_Enabled: yes' <<<"$DSC"; then
-        ok "DSC active"
-    else
-        warn "DSC force есть, но DSC сейчас не active; возможно, ещё не было нового modeset"
-    fi
+    grep -q 'DSC_Enabled: yes' <<<"$DSC"         && ok "DSC active"         || warn "DSC forced but not active yet"
 else
-    bad "i915_dsc_fec_support не найден"
+    bad "i915_dsc_fec_support missing"
 fi
 
-DISPLAY_INFO="$(find /sys/kernel/debug/dri \
-  -name i915_display_info \
-  -print -quit 2>/dev/null || true)"
+DISPLAY_INFO="$(find /sys/kernel/debug/dri   -name i915_display_info   -print -quit 2>/dev/null || true)"
 
-if [[ -n "$DISPLAY_INFO" ]]; then
+if [ -n "$DISPLAY_INFO" ]; then
     PIPE="$(grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO" 2>/dev/null || true)"
 
     if grep -q 'bpp=30' <<<"$PIPE" && grep -q 'dither=no' <<<"$PIPE"; then
         ok "display: bpp=30, dither=no"
-    elif [[ -n "$PIPE" ]]; then
-        warn "display сейчас не bpp=30/dither=no: $PIPE"
+    elif [ -n "$PIPE" ]; then
+        warn "display state: $PIPE"
     fi
 fi
 
-if [[ -d /opt/honor-libfprint-sdcp ]]; then
+if [ -d /opt/honor-libfprint-sdcp ]; then
     ok "private SDCP libfprint directory exists"
 
     if ldconfig -p 2>/dev/null | grep -q '/opt/honor-libfprint-sdcp'; then
-        ok "private SDCP libfprint есть в ld cache"
+        ok "private SDCP libfprint is in ld cache"
     else
-        bad "private SDCP libfprint выпал из ld cache"
+        bad "private SDCP libfprint missing from ld cache"
     fi
 else
-    bad "/opt/honor-libfprint-sdcp отсутствует"
+    bad "/opt/honor-libfprint-sdcp missing"
 fi
 
 echo
 
-if (( FAIL )); then
+if [ "$FAIL" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
 fi
@@ -1001,14 +832,14 @@ sudo chmod 755 /usr/local/lib/honor/health-check.sh
 sudo tee /etc/systemd/system/honor-health-check.service >/dev/null <<'EOF'
 [Unit]
 Description=HONOR ZQC-P M1230 health check
-After=display-manager.service honor-force-dsc.service honor-hid-bpf-reapply.service
+After=display-manager.service honor-force-dsc.service honor-hid-bpf-reapply.service honor-zqcp-kbdlight.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/lib/honor/health-check.sh
 EOF
 
-Создаём timer:
+Timer:
 
 sudo tee /etc/systemd/system/honor-health-check.timer >/dev/null <<'EOF'
 [Unit]
@@ -1030,314 +861,125 @@ sudo systemctl enable honor-health-check.timer
 
 
 ======================================================================
-ШАГ 17. ЧИСТИМ LAYERED BUILD-ПАКЕТЫ, НО НЕ ЛОМАЕМ KBDLIGHT REBUILD
+15. БЕЗОПАСНЫЙ UPDATER ДЛЯ HONOR SOURCE TREE
 ======================================================================
 
-ВАЖНО: после добавления honor-zqcp-kbdlight НЕЛЬЗЯ удалять вообще все build
-tools из temp-layered.txt.
+Установленные фиксы НЕ должны автоматически меняться при обновлении source.
 
-Наш service /usr/local/lib/honor/kbdlight-build-load.sh после обновления kernel
-при необходимости сам пересобирает honor_zqcp_kbdlight.ko. Для этого ему
-нужны как минимум:
+Создаём helper:
 
-- gcc
-- make
+sudo tee /usr/local/bin/honor-source-update >/dev/null <<'EOF'
+#!/usr/bin/bash
+set -euo pipefail
 
-matching kernel-devel Bazzite сейчас поставляет вместе со своим OGC kernel.
+REPO=/var/opt/honor-magicbook-linux
+cd "$REPO"
 
-Git тоже оставляем: он нужен honor-source-update.
-
-Остальные build-only пакеты после успешной установки micmute/touchpad/fingerprint
-в runtime не нужны. Их можно удалить, чтобы уменьшить rpm-ostree layering.
-
-Посмотреть, что мы временно добавляли:
-
-cat /var/lib/honor/temp-layered.txt
-
-Безопасно удалить всё из этого списка КРОМЕ gcc и make:
-
-mapfile -t ALL_TEMP < /var/lib/honor/temp-layered.txt
-REMOVE=()
-
-for p in "${ALL_TEMP[@]}"; do
-    case "$p" in
-        gcc|make)
-            echo "KEEP: $p (нужен для автоматической пересборки kbdlight)"
-            ;;
-        *)
-            REMOVE+=("$p")
-            ;;
-    esac
-done
-
-if (( ${#REMOVE[@]} )); then
-    sudo rpm-ostree uninstall "${REMOVE[@]}"
-else
-    echo "Нечего удалять."
+if [ "$(git branch --show-current)" != "m1230-bazzite" ]; then
+    echo "STOP: expected branch m1230-bazzite" >&2
+    exit 1
 fi
 
-Отдельно libbpf-devel, если мы layer'или его позже для HID-BPF, в runtime тоже
-не нужен: уже установленные CO-RE .bpf.o работают без него.
-
-Проверить:
-
-rpm -q libbpf-devel >/dev/null 2>&1 && echo "libbpf-devel layered/present"
-
-Если он был добавлен нами через rpm-ostree, его можно снять:
-
-sudo rpm-ostree uninstall libbpf-devel
-
-Если rpm-ostree скажет, что пакет не requested/layered — просто ничего не делай.
-
-Проверяем pending deployment:
-
-rpm-ostree status -v
-
-Почему вообще чистим:
-Bazzite официально предупреждает, что лишние rpm-ostree layered packages могут
-замедлять обновления и иногда блокировать upgrade/rebase из-за dependency
-conflicts. Поэтому держим только то, что реально нужно host-системе.
-
-
-======================================================================
-ШАГ 18. ФИНАЛЬНЫЙ REBOOT
-======================================================================
-
-systemctl reboot
-
-
-======================================================================
-ШАГ 19. ФИНАЛЬНАЯ ПРОВЕРКА ВСЕГО
-======================================================================
-
-После загрузки:
-
-bash
-
-Ждём примерно 45-60 секунд и смотрим автоматический отчёт:
-
-cat /var/lib/honor/health-last.txt
-
-В идеале:
-
-RESULT: OK
-
-Теперь отдельно проверяем экран.
-
-DSC:
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-sudo cat "$DSC_FILE" | grep -E \
-  'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
-
-Хотим:
-
-DSC_Enabled: yes
-DSC_Sink_Support: yes
-Force_DSC_Enable: yes
-
-10-bit:
-
-DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri \
-  -name i915_display_info \
-  -print -quit)
-
-sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
-
-Хотим:
-
-bpp=30
-dither=no
-
-PSR:
-
-cat /sys/module/xe/parameters/enable_psr
-
-Хотим:
-
-1
-
-PSR mode:
-
-PSR_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_psr_status' \
-  -print -quit)
-
-sudo grep '^PSR mode' "$PSR_FILE"
-
-Хотим PSR1 enabled.
-
-BPF objects:
-
-test -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o && echo "micmute: OK"
-test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o && echo "touchpad-edge: OK"
-
-Micmute re-apply:
-
-systemctl is-active honor-hid-bpf-reapply.service
-
-Должно быть active.
-
-Fingerprint:
-
-fprintd-verify
-
-
-======================================================================
-ЕСЛИ Force_DSC_Enable=yes, НО DSC_Enabled=no
-======================================================================
-
-Это значит, что флаг уже выставлен, но после него ещё не произошло полноценного
-modeset.
-
-В GNOME:
-Settings -> Displays -> переключи refresh rate 120 -> 60 -> 120.
-
-Потом повтори:
-
-sudo cat "$DSC_FILE" | grep -E \
-  'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
-
-и:
-
-sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
-
-Нужны:
-
-DSC_Enabled: yes
-bpp=30
-dither=no
-
-
-======================================================================
-КАК ТЕПЕРЬ ОБНОВЛЯТЬ BAZZITE
-======================================================================
-
-Обычный Bazzite update делаешь ШТАТНО, как всегда.
-
-После update:
-1. перезагружаешься;
-2. ждёшь примерно минуту;
-3. выполняешь:
-
-cat /var/lib/honor/health-last.txt
-
-Если:
-
-RESULT: OK
-
-ничего делать не надо.
-
-Почему наши вещи должны переживать Bazzite updates:
-- ACPI AML находится в /etc;
-- dracut config находится в /etc;
-- rpm-ostree local initramfs включён постоянно;
-- xe.enable_psr=1 хранится как karg;
-- HID-BPF объекты живут в /etc/udev-hid-bpf;
-- micmute имеет boot re-apply service;
-- DSC имеет собственный systemd service;
-- fingerprint SDCP library живёт в /opt;
-- его ld.so config живёт в /etc;
-- source tree живёт в /var/opt;
-- мы НЕ подменяем kernel modules;
-- мы НЕ собираем xe.ko под конкретную версию kernel.
-
-Именно поэтому kernel update не должен заставлять нас пересобирать половину
-ноутбука заново.
-
-
-======================================================================
-ЧТО ПЕРЕЖИВАЕТ ОБЫЧНЫЙ BAZZITE UPDATE
-======================================================================
-
-Обычный Bazzite deployment update НЕ должен сам по себе снести установленные
-HONOR fixes.
-
-Ожидаемо сохраняются:
-- ACPI override в /etc/honor-magicbook/acpi + dracut config в /etc;
-- rpm-ostree initramfs local mode;
-- kernel arg xe.enable_psr=1;
-- HID-BPF objects в /etc/udev-hid-bpf;
-- honor-hid-bpf-reapply.service;
-- touchpad-edge HID-BPF (CO-RE, boot-time attach через udev-hid-bpf);
-- private fingerprint libfprint в /opt/honor-libfprint-sdcp;
-- ld.so config и udev rule в /etc;
-- honor-force-dsc.service + helper;
-- honor-health-check.timer;
-- honor-zqcp-kbdlight.service + source/helper в /var/lib/honor и /usr/local/lib/honor;
-- source tree в /var/opt/honor-magicbook-linux.
-
-Единственный компонент, который реально привязан к версии kernel — наш
-out-of-tree honor_zqcp_kbdlight.ko. Его service специально проверяет uname -r и
-при смене kernel пересобирает .ko, если matching kernel-devel доступен. После
-сборки installer/helper ставит SELinux type modules_object_t перед insmod.
-
-Что всё же МОЖЕТ сломаться после большого update:
-1. kernel API изменится и honor_zqcp_kbdlight перестанет собираться;
-2. OGC kernel уберёт/переименует debugfs i915_dsc_fec_support — тогда DSC service
-   упадёт, но система загрузится;
-3. HID-BPF kernel ABI/BTF изменится настолько, что существующий CO-RE object не
-   сможет загрузиться (обычно CO-RE как раз сделан, чтобы этого не требовалось);
-4. новый fprintd/libfprint ABI окажется несовместим с private SDCP library;
-5. layered rpm-ostree package получит dependency conflict и сам update
-   остановится до разрешения конфликта;
-6. BIOS update изменит ACPI table/EC layout — это отдельный риск, опаснее
-   обычного Bazzite update.
-
-После КАЖДОГО Bazzite update + reboot достаточно сначала посмотреть автоматический
-health-check:
-
-cat /var/lib/honor/health-last.txt
-
-И дополнительно keyboard backlight service:
-
-systemctl is-active honor-zqcp-kbdlight.service
-test -d /sys/class/leds/honor::kbd_backlight \
-  && echo "kbdlight: OK" \
-  || echo "kbdlight: FAIL"
-
-Если health-last.txt заканчивается RESULT: OK и kbdlight: OK — ничего
-переустанавливать не надо.
-
-Если новый deployment реально сломал загрузку/графику, остаётся rollback на
-предыдущий deployment; рабочий deployment был дополнительно pinned в начале
-гайда.
-
-======================================================================
-КАК ОБНОВЛЯТЬ САМ HONOR-РЕПОЗИТОРИЙ
-======================================================================
-
-НЕ:
-
-cd /var/opt/honor-magicbook-linux
-git pull
-
-А только:
+if [ -n "$(git status --porcelain)" ]; then
+    echo "STOP: working tree dirty" >&2
+    git status --short
+    exit 1
+fi
+
+git branch -f honor-last-good HEAD
+git fetch --prune origin
+
+if git rebase origin/main; then
+    echo "HONOR source tree updated."
+    echo "Installed system fixes were NOT automatically reinstalled."
+else
+    git rebase --abort || true
+    echo "STOP: upstream conflicts with local M1230/Bazzite changes." >&2
+    exit 1
+fi
+EOF
+
+sudo chmod 755 /usr/local/bin/honor-source-update
+
+В будущем НЕ делай обычный git pull в HONOR repo.
+
+Используй:
 
 honor-source-update
 
-Updater:
-- откажется работать на грязном tree;
-- сохранит старый HEAD как honor-last-good;
-- fetch'нет upstream;
-- попробует rebase нашего одного M1230 commit;
-- при конфликте отменит rebase;
-- НИЧЕГО автоматически не переустановит в системе.
 
-Вернуться к последнему source state:
+======================================================================
+16. ФИНАЛЬНЫЙ REBOOT
+======================================================================
 
-cd /var/opt/honor-magicbook-linux
-git reset --hard honor-last-good
+Перезагрузка:
 
-Это откатывает ТОЛЬКО исходники.
-Уже установленные системные фиксы от этого сами не меняются.
+systemctl reboot
+
+После загрузки НИЧЕГО вручную не запускай.
+
+Подожди примерно 45-60 секунд.
+
+Потом:
+
+cat /var/lib/honor/health-last.txt
+
+Идеальный итог:
+
+[ OK ] ACPI: no AE_AML_INTERNAL
+[ OK ] touchscreen 2808:5662
+[ OK ] touchpad 27c6:0f9a
+[ OK ] xe.enable_psr=1
+[ OK ] micmute HID-BPF object installed
+[ OK ] touchpad-edge HID-BPF object installed
+[ OK ] micmute re-apply service active
+[ OK ] phantom KEY_MICMUTE absent
+[ OK ] keyboard backlight service active
+[ OK ] honor::kbd_backlight present
+[ OK ] DSC sink supported
+[ OK ] DSC force enabled
+[ OK ] DSC active
+[ OK ] display: bpp=30, dither=no
+[ OK ] private SDCP libfprint directory exists
+[ OK ] private SDCP libfprint is in ld cache
+
+RESULT: OK
+
+Если RESULT: OK — установка закончена.
 
 
 ======================================================================
-ЕСЛИ НОВЫЙ BAZZITE UPDATE СЛОМАЛ ЗАГРУЗКУ
+17. ЧТО ПЕРЕЖИВАЕТ ОБЫЧНЫЙ BAZZITE UPDATE
+======================================================================
+
+Обычный rpm-ostree/Bazzite deployment update не должен снести:
+
+- /etc/honor-magicbook/acpi;
+- dracut config;
+- local initramfs mode;
+- xe.enable_psr=1 kernel arg;
+- /etc/udev-hid-bpf objects;
+- honor-hid-bpf-reapply.service;
+- private fingerprint lib в /opt/honor-libfprint-sdcp;
+- fingerprint ld.so / udev config в /etc;
+- honor-force-dsc.service;
+- honor-zqcp-kbdlight.service;
+- health-check timer;
+- source tree в /var/opt.
+
+Keyboard backlight .ko — единственная наша часть, привязанная к release kernel.
+Его service сам проверяет uname -r, пересобирает module под новый kernel и
+ставит SELinux type modules_object_t перед insmod.
+
+После каждого Bazzite update + reboot просто смотри:
+
+cat /var/lib/honor/health-last.txt
+
+Если RESULT: OK — ничего переустанавливать не надо.
+
+
+======================================================================
+18. ЕСЛИ UPDATE ЧТО-ТО СЛОМАЛ
 ======================================================================
 
 Если система загружается:
@@ -1346,1303 +988,80 @@ sudo rpm-ostree rollback
 systemctl reboot
 
 Если новый deployment вообще не грузится:
-- в boot menu выбери предыдущий deployment;
-- загрузись;
-- затем:
+- выбери предыдущий deployment в boot menu;
+- после загрузки:
 
 sudo rpm-ostree rollback
 systemctl reboot
 
-Старый рабочий deployment мы дополнительно закрепили в самом начале через:
+В самом начале рабочий deployment был pinned через:
 
-ostree admin pin 0
-
-
-======================================================================
-ЧТО МЫ СПЕЦИАЛЬНО НЕ СТАВИМ НА M1230
-======================================================================
-
-1. cdclk-ptl
-Нужный Panther Lake CDCLK fix уже есть в текущем Bazzite OGC kernel.
-
-2. patch/edp-dsc/install.sh
-Не нужен: используем уже существующий writable DSC switch и не трогаем xe.ko.
-
-3. sof-audio
-Нужное refresh copier_data исправление уже есть в текущем OGC kernel.
-
-4. i8042.dumbkbd=1
-Не нужен на Linux 7.2+ и ломает нормальный Caps Lock LED.
-
-5. oled-backlight
-Не копируем floor с чужой панели. Его сначала надо отдельно измерить на M1230.
-
-6. fan
-Не копируем EC offsets M1010/M1050 без измерения M1230.
-
-7. battery
-Не копируем EC charge presets без проверки M1230.
-
-8. hotkeys / hotkey-actions
-Не копируем вслепую: камера у M1230 имеет USB ID 30c9:012c,
-а у известных M1010/M1050 другой ID.
-
-9. headset-mic
-SSID 1ee7:209d известен, но отдельный kernel-module quirk ставим только если
-реально окажется, что микрофон 3.5mm гарнитуры не работает.
-
-
+sudo ostree admin pin 0
 
 
 ======================================================================
-ДОПОЛНЕНИЕ: ПОДСВЕТКА КЛАВИАТУРЫ НА ZQC-P / M1230
+19. ЧТО НЕ СТАВИТЬ НА ЭТОМ M1230
 ======================================================================
 
-ВАЖНО: KDE действительно показывает ползунок "Подсветка клавиатуры", но на
-ZQC-P это НЕ означает, что управление работает.
+Не ставим:
 
-Текущий in-tree huawei-wmi создаёт интерфейс huawei::kbd_backlight / UPower
-KbdBacklight, поэтому KDE рисует ползунок. Однако на ZQC-P запись уровня через
-этот путь заканчивается -ENODEV и физическая яркость не меняется.
+1. i8042.dumbkbd=1
+   На Linux 7.2+ нужный keyboard quirk уже upstream, dumbkbd ломает Caps Lock LED.
 
-Это прямо задокументировано в upstream HONOR Linux repo:
-docs/LIMITATIONS.md и docs/hardware/zqc-p.md.
+2. patch/cdclk-ptl/install.sh
+   Нужный Panther Lake CDCLK fix уже есть в проверенном OGC kernel.
 
-То есть:
-- KDE slider существует;
-- UPower KbdBacklight существует;
-- реальная подсветка через текущий huawei-wmi НЕ меняется.
+3. patch/edp-dsc/install.sh
+   Мы используем штатный writable debugfs switch текущего OGC kernel.
+   Никакого custom xe.ko.
 
-Это НЕ ограничение firmware. В DSDT ZQC-P есть EC field KBBL at offset 0x41.
-Известное отображение:
-- 0x04 = off
-- 0x02 = low
-- 0x03 = high
-- 0x01 = latch current level
+4. sof-audio backport
+   Нужный fix уже был в проверенном OGC kernel.
 
-Для sibling FMB-P уже существует GPL driver honor-fmbp-kbdlight, который
-управляет тем же EC полем. Но на M1230 его нельзя ставить вслепую:
-он DMI-bound к FMB-P, а на ZQC-P уже существует мёртвый huawei::kbd_backlight,
-поэтому сначала нужен отдельный ZQC-P/M1230-safe вариант без конфликта LED name.
+5. oled-backlight patch
+   Не копируем чужой panel floor без отдельного измерения M1230.
 
-Пока этот отдельный драйвер не добавлен и не протестирован:
-keyboard backlight slider в KDE считать НЕРАБОЧИМ.
+6. fan patch
+   Не копируем EC offsets с другой board revision.
 
-======================================================================
-ДОПОЛНЕНИЕ: РЕАЛЬНОЕ УПРАВЛЕНИЕ ПОДСВЕТКОЙ КЛАВИАТУРЫ НА M1230
-======================================================================
+7. battery charge presets
+   Не копируем EC values с M1010/M1050.
 
-На ZQC-P штатный KDE/UPower slider может существовать, но через текущий
-huawei-wmi физическую яркость не менять.
+8. hotkey-actions от другой board
+   У M1230 другая камера и часть hardware IDs.
 
-Для M1230 добавлен отдельный GPL LED-class driver:
-honor-zqcp-kbdlight/
+9. постоянный EC polling ради Fn+Space <-> KDE slider sync
+   Не нужен. Fn+Space и KDE slider оба работают, просто могут визуально
+   рассинхронизироваться после firmware-side переключения.
 
-Он основан на drphilth honor-fmbp-kbdlight и адаптирован только под:
-- HONOR
-- ZQC-P
-- board M1230
-
-Перед загрузкой installer дополнительно проверяет, что текущий DSDT содержит
-KBBL/GKBM/SKBM. Модуль использует документированный EC KBBL offset 0x41:
-- 0x04 off
-- 0x02 low
-- 0x03 high
-- 0x01 latch
-
-Он регистрирует отдельный LED:
-
-/sys/class/leds/honor::kbd_backlight
-
-и не меняет физическую яркость при самой загрузке модуля.
-
-Установка из my-dotfiles:
-
-rm -rf /tmp/my-dotfiles
-git clone --depth 1 https://github.com/pluseight8/my-dotfiles.git /tmp/my-dotfiles
-sudo bash /tmp/my-dotfiles/honor-zqcp-kbdlight/install-bazzite.sh
-
-Проверка напрямую:
-
-echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-echo 1 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-
-На M1230 подтверждено: прямые записи 0/1/2 в
-/sys/class/leds/honor::kbd_backlight/brightness ФИЗИЧЕСКИ меняют подсветку
-клавиатуры. Значит EC mapping и наш honor_zqcp_kbdlight driver работают.
-
-Если после установки прямой sysfs test работает, а KDE slider всё ещё ничего
-не меняет, проблема уже не в EC driver, а в том, что UPower/PowerDevil ещё
-держат старый backend.
-
-Перезапусти их:
-
-sudo systemctl restart upower.service
-systemctl --user restart plasma-powerdevil.service
-
-После этого снова проверь ползунок KDE.
-
-Если slider всё ещё мёртвый, собери диагностику:
-
-busctl tree org.freedesktop.UPower | grep -i KbdBacklight
-ls -1 /sys/class/leds
-
-Если эти три значения реально меняют подсветку, KDE/UPower можно перезапустить:
-
-sudo systemctl restart upower.service
-
-После этого при необходимости один раз выйти из KDE и войти обратно.
-
-Для обновлений Bazzite:
-source и собранные модули лежат в /var/lib/honor.
-honor-zqcp-kbdlight.service при boot проверяет текущий kernel и автоматически
-пересобирает модуль, если kernel release изменился и matching kernel-devel
-доступен.
 
 ======================================================================
-ДИАГНОСТИКА: HONOR::KBD_BACKLIGHT ПРОПАЛ ПОСЛЕ УСТАНОВКИ
+20. КОРОТКО: ПОЧЕМУ ИМЕННО ТАК
 ======================================================================
 
-Если прямой sysfs test раньше работал:
-
-echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-
-но позже `ls -1 /sys/class/leds` больше НЕ показывает
-`honor::kbd_backlight`, сначала НИЧЕГО не переустанавливаем.
-
-Собрать состояние service/module/journal:
-
-systemctl status honor-zqcp-kbdlight.service --no-pager -l
-lsmod | grep honor_zqcp || true
-sudo journalctl -u honor-zqcp-kbdlight.service -b --no-pager -n 50
-
-Также проверить, существует ли LED сейчас:
-
-test -d /sys/class/leds/honor::kbd_backlight \
-  && echo "honor::kbd_backlight: PRESENT" \
-  || echo "honor::kbd_backlight: MISSING"
-
-Эти команды нужны, чтобы понять, почему модуль, который уже доказанно умеет
-управлять физической подсветкой на M1230, не остаётся загруженным/не создаёт
-LED после последующих действий или boot.
-
-ВАЖНО ДЛЯ ЭТОГО ГАЙДА:
-все следующие диагностические и исправляющие команды по этой установке должны
-сначала добавляться сюда в GitHub, а уже потом выполняться на ноутбуке.
-
-======================================================================
-FIX: KBDLIGHT SERVICE БЫЛ ENABLED, НО НЕ ЗАПУЩЕН КАК SYSTEMD UNIT
-======================================================================
-
-Если прямой sysfs test раньше работал, но позже
-/sys/class/leds/honor::kbd_backlight исчез, первым делом запускаем service
-как настоящий systemd unit, а не только helper вручную:
-
-sudo systemctl enable --now honor-zqcp-kbdlight.service
-
-Проверяем:
-
-systemctl status honor-zqcp-kbdlight.service --no-pager -l
-lsmod | grep honor_zqcp || true
-test -d /sys/class/leds/honor::kbd_backlight \
-  && echo "honor::kbd_backlight: PRESENT" \
-  || echo "honor::kbd_backlight: MISSING"
-
-Если PRESENT, сразу проверяем физическую подсветку:
-
-echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-sleep 2
-echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-
-После этого перезапускаем userspace power stack:
-
-sudo systemctl restart upower.service
-systemctl --user restart plasma-powerdevil.service
-
-Причина этого шага:
-первый вариант install-bazzite.sh делал `systemctl enable`, а затем запускал
-build/load helper напрямую. То есть module мог быть загружен, но сам unit не
-становился active. Теперь service должен быть ENABLED + ACTIVE, чтобы systemd
-держал состояние и корректно поднимал driver после boot.
-
-======================================================================
-ДИАГНОСТИКА: HONOR-ZQCP-KBDLIGHT.SERVICE FAILED ПРИ ENABLE --NOW
-======================================================================
-
-Если команда:
-
-sudo systemctl enable --now honor-zqcp-kbdlight.service
-
-заканчивается сообщением:
-
-Job for honor-zqcp-kbdlight.service failed because the control process exited with error code
-
-НЕ переустанавливаем драйвер и НЕ меняем EC вручную.
-
-Сначала собираем точную причину:
-
-systemctl status honor-zqcp-kbdlight.service --no-pager -l
-sudo journalctl -xeu honor-zqcp-kbdlight.service --no-pager -n 100
-
-Потом отдельно запускаем helper вручную с shell trace:
-
-sudo bash -x /usr/local/lib/honor/kbdlight-build-load.sh
-
-И проверяем ключевые пути:
-
-uname -r
-ls -ld /lib/modules/"$(uname -r)"/build
-ls -l /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko 2>/dev/null || true
-lsmod | grep honor_zqcp || true
-ls -1 /sys/class/leds
-
-ВАЖНО:
-ошибка systemd здесь ещё не означает, что EC driver сломан. Она означает только,
-что ExecStart helper вернул ненулевой код. По trace/journal определяем конкретный
-шаг: kernel-devel, rebuild, insmod или появление LED device.
-
-======================================================================
-ДИАГНОСТИКА: INSMOD -> OPERATION NOT PERMITTED
-======================================================================
-
-Если journal/helper показывает примерно это:
-
-insmod: ERROR: could not insert module .../honor_zqcp_kbdlight.ko: Operation not permitted
-
-при этом:
-- matching /lib/modules/$(uname -r)/build существует;
-- honor_zqcp_kbdlight.ko успешно собран;
-- lsmod не показывает honor_zqcp_kbdlight;
-
-то наиболее вероятная причина — Secure Boot / kernel lockdown не разрешает
-загрузку нашего неподписанного out-of-tree .ko.
-
-НЕ отключаем Secure Boot вслепую. Сначала подтверждаем:
-
-mokutil --sb-state || true
-cat /sys/kernel/security/lockdown 2>/dev/null || true
-sudo dmesg | grep -iE 'lockdown|secure boot|verification|module.*signature|unsigned|key.*rejected' | tail -n 80
-
-Также смотрим подпись модуля:
-
-modinfo -F signer /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko 2>/dev/null || true
-modinfo -F sig_id /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko 2>/dev/null || true
-
-Если signer пустой, а Secure Boot/lockdown включён и dmesg говорит про
-verification/signature/key rejection, причина подтверждена: модуль надо
-подписать доверенным ключом, а не пересобирать заново и не трогать EC mapping.
-
-До подтверждения ничего в BIOS не меняем.
-
-======================================================================
-ДИАГНОСТИКА: SECURE BOOT ВЫКЛЮЧЕН, НО SYSTEMD INSMOD ДАЁТ EPERM
-======================================================================
-
-Если предыдущая проверка показывает:
-- SecureBoot disabled;
-- lockdown = [none];
-- signer у honor_zqcp_kbdlight.ko пустой;
-- kernel разрешает другие неподписанные модули с tainting;
-
-то гипотеза про Secure Boot НЕ подтверждена.
-
-Так как первый install-bazzite.sh успешно загружал тот же .ko из root shell,
-а honor-zqcp-kbdlight.service позже получает "Operation not permitted",
-проверяем две вещи:
-1) не отключена ли загрузка модулей глобально;
-2) не блокирует ли загрузку SELinux/systemd context при попытке читать .ko из
-   /var/lib/honor.
-
-Сначала:
-
-cat /proc/sys/kernel/modules_disabled
-getenforce
-
-Потом контексты файлов:
-
-ls -lZ /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko
-ls -lZ /usr/local/lib/honor/kbdlight-build-load.sh
-ls -lZ /etc/systemd/system/honor-zqcp-kbdlight.service
-
-Проверяем SELinux AVC:
-
-sudo ausearch -m AVC,USER_AVC -ts boot 2>/dev/null \
-  | grep -Ei 'kbdlight|honor_zqcp|insmod|module|var/lib/honor' \
-  | tail -n 100 || true
-
-sudo journalctl -k -b --no-pager \
-  | grep -Ei 'avc|selinux|denied|kbdlight|honor_zqcp' \
-  | tail -n 100 || true
-
-И главный контрольный тест: грузим ТОТ ЖЕ .ko вручную из обычного sudo shell и
-сразу читаем последние kernel messages:
-
-KO="/var/lib/honor/kbdlight/$(uname -r)/honor_zqcp_kbdlight.ko"
-sudo insmod "$KO"; RC=$?
-echo "insmod rc=$RC"
-lsmod | grep honor_zqcp || true
-ls -1 /sys/class/leds | grep -E 'honor|huawei|kbd' || true
-sudo dmesg | tail -n 100
-
-Интерпретация:
-- modules_disabled = 1 -> kernel уже глобально запретил новые module loads;
-- manual sudo insmod WORKS, а systemd service FAILS -> почти наверняка
-  SELinux/unit-context/path-label issue;
-- manual sudo insmod тоже FAILS -> точную причину берём из последних dmesg;
-- после успешного manual insmod должен снова появиться honor::kbd_backlight.
-
-НЕ отключать SELinux и НЕ менять Secure Boot ради теста.
-
-======================================================================
-FIX: SELINUX БЛОКИРУЕТ KBDLIGHT .KO ИЗ /VAR/LIB/HONOR
-======================================================================
-
-Подтверждённая причина на M1230:
-
-- kernel.modules_disabled = 0
-- SELinux = Enforcing
-- ручной sudo insmod того же .ko работает (insmod rc=0)
-- honor_zqcp_kbdlight появляется в lsmod
-- /sys/class/leds/honor::kbd_backlight появляется
-- journal/ausearch показывает AVC denial:
-  comm="insmod"
-  path="/var/lib/honor/kbdlight/.../honor_zqcp_kbdlight.ko"
-  scontext=system_u:system_r:systemd_t
-  tcontext=system_u:object_r:var_lib_t
-  denied { module_load }
-
-То есть сам модуль исправен. Systemd service падает потому, что .ko лежит под
-/var/lib/honor и имеет SELinux label var_lib_t, из которого systemd_t не может
-делать module_load.
-
-НЕ отключаем SELinux.
-
-Сначала смотрим SELinux type обычного kernel module в /lib/modules:
-
-REF_MODULE="$(find /lib/modules/"$(uname -r)" -type f -name '*.ko*' -print -quit)"
-echo "$REF_MODULE"
-ls -lZ "$REF_MODULE"
-
-Если type у reference module = modules_object_t, присваиваем тот же type нашему
-module tree:
-
-sudo chcon -R -t modules_object_t /var/lib/honor/kbdlight
-
-Проверяем:
-
-ls -lZ /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko
-
-Если honor_zqcp_kbdlight уже загружен вручную, выгружаем его перед повторным
-стартом service:
-
-sudo rmmod honor_zqcp_kbdlight 2>/dev/null || true
-
-Теперь:
-
-sudo systemctl restart honor-zqcp-kbdlight.service
-systemctl status honor-zqcp-kbdlight.service --no-pager -l
-
-Проверяем:
-
-lsmod | grep honor_zqcp || true
-ls -1 /sys/class/leds | grep -E 'honor|huawei|kbd' || true
-
-И физический тест:
-
-echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-sleep 2
-echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-
-ВАЖНО:
-chcon подтверждает/fixes проблему прямо сейчас, но label может потеряться, если
-файл будет создан заново при rebuild. Поэтому после подтверждения installer/
-rebuild helper должен сам ставить корректный SELinux type на новый .ko.
-
-======================================================================
-ПОДТВЕРЖДЕНО: REFERENCE KERNEL MODULE ИМЕЕТ modules_object_t
-======================================================================
-
-На M1230/Bazzite проверено: обычный kernel module из
-/lib/modules/$(uname -r) имеет SELinux type:
-
-system_u:object_r:modules_object_t:s0
-
-Значит honor_zqcp_kbdlight.ko под /var/lib/honor должен получить тот же type.
-
-Применяем к уже собранному module tree:
-
-sudo chcon -R -t modules_object_t /var/lib/honor/kbdlight
-
-Проверяем конкретный .ko:
-
-ls -lZ /var/lib/honor/kbdlight/"$(uname -r)"/honor_zqcp_kbdlight.ko
-
-Если модуль сейчас загружен после ручного sudo insmod, выгружаем:
-
-sudo rmmod honor_zqcp_kbdlight 2>/dev/null || true
-
-Теперь запускаем именно systemd service:
-
-sudo systemctl restart honor-zqcp-kbdlight.service
-
-Проверяем:
-
-systemctl status honor-zqcp-kbdlight.service --no-pager -l
-lsmod | grep honor_zqcp || true
-ls -1 /sys/class/leds | grep -E 'honor|huawei|kbd' || true
-
-Если service active и honor::kbd_backlight присутствует, физический тест:
-
-echo 0 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-sleep 2
-echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
-
-После успешного теста обновляем локальную установку installer'ом из my-dotfiles,
-потому что актуальный install-bazzite.sh теперь сам делает:
-
-chcon -t modules_object_t "$KO"
-
-после каждой сборки нового .ko. Это нужно, чтобы fix не сломался после будущего
-kernel update.
-
-Обновление установленного helper/service из GitHub:
-
-rm -rf /tmp/my-dotfiles
-git clone --depth 1 https://github.com/pluseight8/my-dotfiles.git /tmp/my-dotfiles
-sudo bash /tmp/my-dotfiles/honor-zqcp-kbdlight/install-bazzite.sh
-
-======================================================================
-KDE SLIDER: DRIVER РАБОТАЕТ, НО POWERDEVIL ЕЩЁ НЕ УПРАВЛЯЕТ ИМ
-======================================================================
-
-Состояние, подтверждённое на M1230:
-- honor-zqcp-kbdlight.service = active (exited)
-- honor_zqcp_kbdlight загружен
-- /sys/class/leds/honor::kbd_backlight существует
-- прямые записи 0/1/2 физически меняют подсветку
-- KDE slider при этом может всё ещё ничего не делать
-
-ВАЖНО: после того как LED наконец появился и стал постоянным, UPower и
-PowerDevil надо перезапустить ЕЩЁ РАЗ. Раньше они перезапускались в момент,
-когда honor::kbd_backlight уже успевал исчезнуть.
-
-Сначала:
-
-sudo systemctl restart upower.service
-systemctl --user restart plasma-powerdevil.service
-sleep 2
-
-Проверяем, к какому sysfs LED реально привязан legacy UPower object:
-
-busctl get-property org.freedesktop.UPower \
-  /org/freedesktop/UPower/KbdBacklight \
-  org.freedesktop.UPower.KbdBacklight NativePath
-
-Проверяем его значения:
-
-busctl call org.freedesktop.UPower \
-  /org/freedesktop/UPower/KbdBacklight \
-  org.freedesktop.UPower.KbdBacklight GetBrightness
-
-busctl call org.freedesktop.UPower \
-  /org/freedesktop/UPower/KbdBacklight \
-  org.freedesktop.UPower.KbdBacklight GetMaxBrightness
-
-Прямой тест ЧЕРЕЗ UPower DBus, а не sysfs:
-
-busctl call org.freedesktop.UPower \
-  /org/freedesktop/UPower/KbdBacklight \
-  org.freedesktop.UPower.KbdBacklight SetBrightness i 0
-sleep 2
-cat /sys/class/leds/honor::kbd_backlight/brightness
-
-busctl call org.freedesktop.UPower \
-  /org/freedesktop/UPower/KbdBacklight \
-  org.freedesktop.UPower.KbdBacklight SetBrightness i 2
-cat /sys/class/leds/honor::kbd_backlight/brightness
-
-На новых UPower также пробуем перечислить все keyboard-backlight objects:
-
-busctl call org.freedesktop.UPower \
-  /org/freedesktop/UPower \
-  org.freedesktop.UPower EnumerateKbdBacklights 2>/dev/null || true
-
-busctl tree org.freedesktop.UPower | grep -i KbdBacklight || true
-
-Интерпретация:
-- NativePath указывает на honor::kbd_backlight И SetBrightness 0/2 реально
-  меняет клавиатуру -> UPower исправен, остаётся только KDE/PowerDevil cache;
-- NativePath указывает на другой LED -> KDE управляет не нашим рабочим device;
-- NativePath правильный, но SetBrightness падает -> смотреть journal UPower;
-- DBus test работает, slider нет -> logout/login KDE после restart PowerDevil.
-
-Версия UPower для диагностики:
-
-upower --version 2>/dev/null || rpm -q upower
-
-======================================================================
-РЕШЕНИЕ: FN+SPACE НЕ СИНХРОНИЗИРУЕМ С KDE ЧЕРЕЗ POLLING
-======================================================================
-
-От варианта с опросом EC KBBL каждые 200 ms отказались.
-
-Оставляем простую схему без периодического polling:
-- KDE slider управляет honor::kbd_backlight и физической подсветкой;
-- sysfs 0/1/2 управляет физической подсветкой;
-- Fn+Space отдельно переключает подсветку через firmware/EC;
-- slider KDE может не отражать уровень, изменённый только Fn+Space.
-
-Причина: визуальная синхронизация slider не стоит постоянного периодического
-опроса EC. Если позже появится чистый event-driven путь по firmware/WMI event,
-синхронизацию можно сделать без polling.
-
-Актуальный honor_zqcp_kbdlight driver polling не выполняет.
-
-======================================================================
-ДИАГНОСТИКА: HEALTH-CHECK FAIL ТОЛЬКО ПО DSC / BPP=18
-======================================================================
-
-Если health-last.txt показывает:
-
-[ OK ] DSC sink supported
-[FAIL] DSC force не включился
-[WARN] display сейчас не bpp=30/dither=no: ... dither=yes, bpp=18
-RESULT: FAIL
-
-то остальные фиксы работают, а проблема локализована только в force-DSC.
-
-Сначала проверяем service:
-
-systemctl status honor-force-dsc.service --no-pager -l
-sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
-
-Потом смотрим текущий debugfs state напрямую:
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-echo "$DSC_FILE"
-sudo cat "$DSC_FILE"
-
-Проверяем helper вручную:
-
-sudo bash -x /usr/local/lib/honor/force-dsc.sh
-
-Сразу после helper:
-
-sudo cat "$DSC_FILE"
-
-Хотим увидеть:
-
-DSC_Sink_Support: yes
-Force_DSC_Enable: yes
-
-Если Force_DSC_Enable стал yes, но DSC_Enabled всё ещё no, это ещё не обязательно
-ошибка: force применяется на следующем modeset. Тогда переключи refresh rate
-120 -> 60 -> 120 в KDE Display Configuration и снова:
-
-sudo cat "$DSC_FILE"
-
-DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri \
-  -name i915_display_info \
-  -print -quit)
-
-sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
-
-Хотим:
-- DSC_Enabled: yes
-- Force_DSC_Enable: yes
-- bpp=30
-- dither=no
-
-Если manual helper падает — его trace + journal покажут конкретную причину.
-Если manual helper срабатывает, а boot service нет — чинить надо только ordering
-systemd unit, а не графический driver и не kernel.
-
-======================================================================
-ПОДТВЕРЖДЕНО: DSC HELPER РАБОТАЕТ, BOOT SERVICE СТАРТОВАЛ СЛИШКОМ РАНО
-======================================================================
-
-На M1230 подтверждено вручную:
-
-sudo bash -x /usr/local/lib/honor/force-dsc.sh
-
-сразу даёт:
-
-DSC_Enabled: yes
-DSC_Sink_Support: yes
-Force_DSC_Enable: yes
-
-и:
-
-pipe src=3120x2080+0+0, dither=no, bpp=30
-
-Значит kernel/debugfs switch полностью исправен. Проблема была только в
-systemd ordering: старый unit запускался до display-manager и мог записать
-Force_DSC_Enable слишком рано, после чего display stack инициализировался дальше
-и состояние терялось.
-
-Переносим oneshot ПОСЛЕ display-manager и привязываем к graphical.target.
-
-Перезаписываем unit:
-
-sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
-[Unit]
-Description=Force DSC on HONOR ZQC-P internal eDP panel
-After=display-manager.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/lib/honor/force-dsc.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=graphical.target
-EOF
-
-Обновляем systemd targets:
-
-sudo systemctl disable honor-force-dsc.service
-sudo systemctl daemon-reload
-sudo systemctl enable honor-force-dsc.service
-sudo systemctl restart honor-force-dsc.service
-
-Проверяем прямо сейчас:
-
-systemctl status honor-force-dsc.service --no-pager -l
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-sudo cat "$DSC_FILE" | grep -E \
-  'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
-
-DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri \
-  -name i915_display_info \
-  -print -quit)
-
-sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
-
-Хотим:
-
-DSC_Enabled: yes
-DSC_Sink_Support: yes
-Force_DSC_Enable: yes
-bpp=30
-dither=no
-
-Главная проверка persistence — следующий reboot. После него НЕ запускаем helper
-вручную. Ждём health-check и смотрим:
-
-cat /var/lib/honor/health-last.txt
-
-Если после reboot там:
-- DSC force enabled
-- DSC active
-- display: bpp=30, dither=no
-- RESULT: OK
-
-то boot-ordering fix подтверждён окончательно.
-
-======================================================================
-ДИАГНОСТИКА: HONOR-FORCE-DSC.SERVICE FAILED ПОСЛЕ ПЕРЕНОСА НА GRAPHICAL.TARGET
-======================================================================
-
-Если после изменения unit на:
-
-After=display-manager.service
-WantedBy=graphical.target
-
-команда:
-
-sudo systemctl restart honor-force-dsc.service
-
-падает с "control process exited with error code", сначала НЕ меняем helper и
-НЕ добавляем новые sleeps вслепую.
-
-Смотрим точную ошибку systemd:
-
-systemctl status honor-force-dsc.service --no-pager -l
-sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
-
-Потом проверяем, что systemd реально видит актуальную версию unit:
-
-systemctl cat honor-force-dsc.service
-
-Проверяем зависимости/ordering:
-
-systemctl show honor-force-dsc.service \
-  -p After -p Before -p WantedBy -p ActiveState -p SubState -p Result
-
-И запускаем тот же helper вручную сразу после падения service:
-
-sudo bash -x /usr/local/lib/honor/force-dsc.sh
-
-После этого:
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-sudo cat "$DSC_FILE"
-
-Если manual helper снова срабатывает, а unit падает, причина точно в условиях
-systemd запуска/ordering, а не в DSC debugfs switch.
-
-ПРИМЕЧАНИЕ:
-строка "Обновляем systemd targets:" в гайде — это обычный текст, НЕ команда.
-Если её случайно вставить в shell, будет:
-bash: Обновляем: command not found
-Это безвредно и к DSC failure не относится.
-
-======================================================================
-ДИАГНОСТИКА: DSC HELPER РУЧНОЙ РАБОТАЕТ, SYSTEMD UNIT ПАДАЕТ
-======================================================================
-
-Подтверждённое состояние:
-- /usr/local/lib/honor/force-dsc.sh вручную через sudo работает;
-- после ручного запуска:
-  DSC_Enabled: yes
-  Force_DSC_Enable: yes
-  bpp=30
-  dither=no
-- тот же helper как ExecStart honor-force-dsc.service падает.
-
-Это очень похоже на SELinux denial для записи из systemd_t в debugfs.
-Не отключаем SELinux. Сначала подтверждаем точной AVC-записью.
-
-Команды:
-
-getenforce
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-echo "$DSC_FILE"
-ls -lZ "$DSC_FILE"
-
-sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null \
-  | grep -Ei 'force-dsc|i915_dsc_fec_support|debugfs|systemd_t|dri' \
-  | tail -n 100 || true
-
-sudo journalctl -k -b --no-pager \
-  | grep -Ei 'avc|selinux|denied|i915_dsc_fec_support|force-dsc' \
-  | tail -n 100 || true
-
-И сам journal unit:
-
-sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
-
-Интерпретация:
-- если есть AVC denied для scontext=...systemd_t и target debugfs/debugfs_t,
-  причина подтверждена: systemd service блокирует SELinux;
-- если AVC нет, смотрим точный exit из journal и чиним уже не SELinux.
-
-НЕ делаем setenforce 0 и НЕ выключаем SELinux.
-
-======================================================================
-УСТАРЕЛО: ГИПОТЕЗА ПРО ПОЗДНИЙ DEBUGFS (НЕВЕРНО)
-======================================================================
-
-Journal показал точную причину:
-
-HONOR: i915_dsc_fec_support not found
-
-То есть:
-- SELinux тут НЕ виноват;
-- helper запускается;
-- debugfs монтируется;
-- но eDP/i915_dsc_fec_support появляется позже, чем старый helper ждал.
-
-Старый helper ждал примерно 15 секунд:
-300 попыток * 0.05 s.
-
-На этом M1230 этого иногда мало. Ручной запуск позже уже сразу находит файл и
-успешно включает DSC.
-
-Делаем boot-only ожидание до 90 секунд, с редким polling 2 раза/сек.
-Это НЕ постоянный polling и после успешного DSC helper сразу завершается.
-
-Перезаписываем helper:
-
-sudo tee /usr/local/lib/honor/force-dsc.sh >/dev/null <<'EOF'
-#!/usr/bin/bash
-set -euo pipefail
-
-mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug
-
-DEADLINE=$((SECONDS + 90))
-
-while (( SECONDS < DEADLINE )); do
-    DSC_FILE=$(find /sys/kernel/debug/dri \
-      -path '*/eDP-*/i915_dsc_fec_support' \
-      -print -quit 2>/dev/null || true)
-
-    if [[ -n "$DSC_FILE" && -w "$DSC_FILE" ]]; then
-        if ! grep -q 'DSC_Sink_Support: yes' "$DSC_FILE"; then
-            echo "HONOR: panel does not report DSC support" >&2
-            exit 1
-        fi
-
-        echo 1 > "$DSC_FILE"
-        exit 0
-    fi
-
-    sleep 0.5
-done
-
-echo "HONOR: i915_dsc_fec_support not found after 90s" >&2
-exit 1
-EOF
-
-sudo chmod 755 /usr/local/lib/honor/force-dsc.sh
-
-Перезапускаем service:
-
-sudo systemctl daemon-reload
-sudo systemctl restart honor-force-dsc.service
-
-Проверяем:
-
-systemctl status honor-force-dsc.service --no-pager -l
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-sudo cat "$DSC_FILE" | grep -E \
-  'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
-
-DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri \
-  -name i915_display_info \
-  -print -quit)
-
-sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
-
-Хотим:
-- honor-force-dsc.service: active (exited)
-- DSC_Enabled: yes
-- Force_DSC_Enable: yes
-- bpp=30
-- dither=no
-
-После этого делаем reboot и НЕ запускаем helper вручную. Через ~45-60 секунд:
-
-cat /var/lib/honor/health-last.txt
-
-Если RESULT: OK — автоматический DSC после boot подтверждён.
-
-======================================================================
-ДИАГНОСТИКА: 90-СЕКУНДНЫЙ DSC HELPER ВСЁ РАВНО ПАДАЕТ ИЗ SYSTEMD
-======================================================================
-
-Если после замены helper на 90-секундное ожидание:
-
-sudo systemctl restart honor-force-dsc.service
-
-всё равно падает, больше НИЧЕГО не меняем наугад.
-
-Нужно понять две вещи:
-1) service реально ждёт 90 секунд или завершается раньше;
-2) видит ли process, запущенный systemd, тот же debugfs path, который видит
-   обычный sudo shell.
-
-Сначала точный journal последнего запуска:
-
-date
-systemctl show honor-force-dsc.service \
-  -p Result -p ExecMainCode -p ExecMainStatus -p ActiveState -p SubState \
-  -p TimeoutStartUSec
-
-sudo journalctl -u honor-force-dsc.service -b --no-pager \
-  --since "5 minutes ago"
-
-Теперь обычный root shell — контроль:
-
-sudo bash -lc '
-echo "=== ROOT SHELL ==="
-id
-find /sys/kernel/debug/dri \
-  -path "*/eDP-*/i915_dsc_fec_support" \
-  -print -ls
-'
-
-Теперь тот же probe именно как transient systemd service:
-
-sudo systemd-run \
-  --unit=honor-dsc-probe \
-  --wait --collect --pipe \
-  /usr/bin/bash -lc '
-    echo "=== SYSTEMD SERVICE ==="
-    id
-    mountpoint /sys/kernel/debug || true
-    ls -ldZ /sys/kernel/debug /sys/kernel/debug/dri 2>&1 || true
-    find /sys/kernel/debug/dri \
-      -path "*/eDP-*/i915_dsc_fec_support" \
-      -print -ls 2>&1
-  '
-
-После probe сразу смотрим SELinux:
-
-sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null \
-  | tail -n 100 || true
-
-И kernel journal:
-
-sudo journalctl -k -b --no-pager \
-  --since "5 minutes ago" \
-  | grep -Ei 'avc|selinux|denied|debugfs|i915_dsc|xe' \
-  | tail -n 100 || true
-
-Интерпретация:
-- ROOT SHELL видит i915_dsc_fec_support, а SYSTEMD SERVICE нет ->
-  проблема именно в service context / access к debugfs;
-- оба видят файл, но honor-force-dsc.service всё равно падает ->
-  смотрим ExecMainStatus/journal и сам helper;
-- service завершается заметно раньше 90 секунд ->
-  ищем внешний systemd timeout/kill;
-- AVC появляется после systemd-run probe -> SELinux всё-таки подтверждён;
-- AVC нет и systemd-run видит файл -> SELinux можно окончательно исключить.
-
-======================================================================
-ПОДТВЕРЖДЕНО: HONOR-FORCE-DSC.SERVICE БЛОКИРУЕТ SELINUX
-======================================================================
-
-Причина подтверждена точным AVC.
-
-Transient systemd service ВИДИТ:
-  /sys/kernel/debug/dri/.../eDP-1/i915_dsc_fec_support
-
-Но SELinux запрещает запись:
-
-  avc: denied { write }
-  comm="force-dsc.sh"
-  name="i915_dsc_fec_support"
-  scontext=system_u:system_r:init_t:s0
-  tcontext=system_u:object_r:debugfs_t:s0
-  tclass=file
-
-Ручной sudo shell работает, потому что запускается в другом SELinux context.
-
-ВАЖНО:
-предыдущая гипотеза "debugfs появляется слишком поздно" была неверной.
-Helper писал "not found", потому что его условие проверяло не только наличие
-файла, но и право записи (-w). SELinux делал файл невritable для systemd/init_t.
-
-Пока НЕ:
-- отключаем SELinux;
-- делаем setenforce 0;
-- добавляем широкий allow init_t -> debugfs_t;
-- генерируем audit2allow из всего журнала.
-
-Текущий безопасный статус:
-- DSC helper вручную работает;
-- DSC_Enabled=yes;
-- Force_DSC_Enable=yes;
-- bpp=30;
-- dither=no;
-- проблема только в автоматическом запуске из systemd.
-
-Следующий фикс должен быть узким SELinux-решением только для DSC helper/service,
-а не глобальным разрешением systemd писать в debugfs.
-
-======================================================================
-ФИНАЛЬНЫЙ FIX DSC: ЗАПУСКАЕМ ТОЛЬКО ЭТОТ ONESHOT В unconfined_service_t
-======================================================================
-
-Подтверждено AVC:
-- systemd unit работает в init_t;
-- i915_dsc_fec_support имеет debugfs_t;
-- SELinux запрещает init_t -> debugfs_t { write };
-- обычный sudo shell пишет туда успешно.
-
-Fedora SELinux policy содержит специальный domain unconfined_service_t именно
-для отдельных system services. Используем его ТОЛЬКО для honor-force-dsc.
-SELinux глобально остаётся Enforcing.
-
-Сначала убеждаемся, что type существует:
-
-seinfo -t unconfined_service_t 2>/dev/null || true
-
-Даже если seinfo не установлен, сам запуск service ниже является окончательной
-проверкой.
-
-Перезаписываем unit:
-
-sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
-[Unit]
-Description=Force DSC on HONOR ZQC-P internal eDP panel
-After=display-manager.service
-
-[Service]
-Type=oneshot
-SELinuxContext=system_u:system_r:unconfined_service_t:s0
-ExecStart=/usr/local/lib/honor/force-dsc.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=graphical.target
-EOF
-
-Возвращаем helper к короткому boot-only ожиданию. Это НЕ постоянный polling:
-как только debugfs node доступен, helper пишет 1 и завершается.
-
-sudo tee /usr/local/lib/honor/force-dsc.sh >/dev/null <<'EOF'
-#!/usr/bin/bash
-set -euo pipefail
-
-mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug
-
-for _ in $(seq 1 150); do
-    DSC_FILE=$(find /sys/kernel/debug/dri       -path '*/eDP-*/i915_dsc_fec_support'       -print -quit 2>/dev/null || true)
-
-    if [[ -n "$DSC_FILE" ]]; then
-        if ! grep -q 'DSC_Sink_Support: yes' "$DSC_FILE"; then
-            echo "HONOR: panel does not report DSC support" >&2
-            exit 1
-        fi
-
-        echo 1 > "$DSC_FILE"
-        exit 0
-    fi
-
-    sleep 0.2
-done
-
-echo "HONOR: i915_dsc_fec_support not found" >&2
-exit 1
-EOF
-
-sudo chmod 755 /usr/local/lib/honor/force-dsc.sh
-
-Применяем:
-
-sudo systemctl daemon-reload
-sudo systemctl enable honor-force-dsc.service
-sudo systemctl restart honor-force-dsc.service
-
-Проверяем:
-
-systemctl status honor-force-dsc.service --no-pager -l
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri   -path '*/eDP-*/i915_dsc_fec_support'   -print -quit)
-
-sudo cat "$DSC_FILE" | grep -E   'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
-
-DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri   -name i915_display_info   -print -quit)
-
-sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
-
-Хотим:
-- honor-force-dsc.service = active (exited)
-- DSC_Enabled: yes
-- DSC_Sink_Support: yes
-- Force_DSC_Enable: yes
-- bpp=30
-- dither=no
-
-Проверяем SELinux context реально запущенного ExecStart по journal/audit:
-
-sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null   | grep -Ei 'force-dsc|i915_dsc_fec_support'   | tail -n 20 || true
-
-После успешного результата:
-
-systemctl reboot
-
-После reboot helper вручную НЕ запускать. Через ~45-60 секунд:
-
-cat /var/lib/honor/health-last.txt
-
-Если RESULT: OK — DSC persistence закрыта окончательно.
-
-Почему это лучше, чем audit2allow:
-мы не даём всем init_t services право писать в debugfs. Только этот один
-root-owned oneshot запускается в уже существующем Fedora domain
-unconfined_service_t.
-
-======================================================================
-FIX: 203/EXEC PERMISSION DENIED ПОСЛЕ SELINUXCONTEXT
-======================================================================
-
-Если после добавления:
-
-SELinuxContext=system_u:system_r:unconfined_service_t:s0
-
-service падает так:
-
-status=203/EXEC
-Failed to execute /usr/local/lib/honor/force-dsc.sh: Permission denied
-Failed at step EXEC
-
-это уже НЕ ошибка DSC write.
-
-Причина: systemd пытается напрямую exec'нуть shell-script из /usr/local/lib
-уже в unconfined_service_t. Для этого SELinux transition/entrypoint на самом
-script path может не разрешаться.
-
-Fedora policy для unconfined_service_t разрешает стандартный shell entrypoint,
-поэтому запускаем /usr/bin/bash как executable, а force-dsc.sh передаём ему как
-обычный читаемый script.
-
-Перезаписываем unit:
-
-sudo tee /etc/systemd/system/honor-force-dsc.service >/dev/null <<'EOF'
-[Unit]
-Description=Force DSC on HONOR ZQC-P internal eDP panel
-After=display-manager.service
-
-[Service]
-Type=oneshot
-SELinuxContext=system_u:system_r:unconfined_service_t:s0
-ExecStart=/usr/bin/bash /usr/local/lib/honor/force-dsc.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=graphical.target
-EOF
-
-Применяем:
-
-sudo systemctl daemon-reload
-sudo systemctl restart honor-force-dsc.service
-
-Проверяем:
-
-systemctl status honor-force-dsc.service --no-pager -l
-
-DSC_FILE=$(sudo find /sys/kernel/debug/dri \
-  -path '*/eDP-*/i915_dsc_fec_support' \
-  -print -quit)
-
-sudo cat "$DSC_FILE" | grep -E \
-  'DSC_Enabled|DSC_Sink_Support|Force_DSC_Enable'
-
-DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri \
-  -name i915_display_info \
-  -print -quit)
-
-sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
-
-Ожидаем:
-- service: active (exited)
-- DSC_Enabled: yes
-- Force_DSC_Enable: yes
-- bpp=30
-- dither=no
-
-Потом проверяем, не появилось ли СВЕЖЕГО AVC для force-dsc:
-
-sudo ausearch -m AVC,USER_AVC -ts recent 2>/dev/null \
-  | grep -Ei 'force-dsc|i915_dsc_fec_support' \
-  | tail -n 20 || true
-
-Если service active и свежего AVC нет — reboot.
-После reboot helper вручную НЕ запускать; через ~45-60 секунд:
-
-cat /var/lib/honor/health-last.txt
-
-======================================================================
-ПОДТВЕРЖДЕНО: HONOR-FORCE-DSC.SERVICE РАБОТАЕТ
-======================================================================
-
-Финальное рабочее состояние подтверждено:
-
-honor-force-dsc.service:
-  Active: active (exited)
-  ExecStart=/usr/bin/bash /usr/local/lib/honor/force-dsc.sh
-  status=0/SUCCESS
+ACPI:
+заводская I2C_DEVT на этом M1230 совпала byte-for-byte с reference, поэтому
+override безопасно используем только после MD5 check.
+
+Micmute / touchpad edge:
+HID-BPF CO-RE. Не пересобираем на каждый kernel update.
+
+Fingerprint:
+private patched libfprint живёт в /opt, потому что Bazzite /usr immutable.
+Udev rule кладём в /etc.
+
+Keyboard backlight:
+штатный huawei-wmi создаёт нерабочий slider.
+Наш DMI-bound M1230 driver использует подтверждённый EC KBBL 0x41 и
+регистрирует honor::kbd_backlight.
+SELinux label modules_object_t обязателен для systemd insmod.
 
 DSC:
-  DSC_Enabled: yes
-  DSC_Sink_Support: yes
-  Force_DSC_Enable: yes
+ручная запись в i915_dsc_fec_support работает.
+Systemd init_t SELinux запрещал write в debugfs_t, поэтому только этот один
+oneshot запускается в Fedora domain unconfined_service_t и через /usr/bin/bash.
+SELinux всей системы остаётся Enforcing.
 
-Display:
-  dither=no
-  bpp=30
+Это именно тот набор, который после чистого reboot дал:
 
-Если сразу после этого `ausearch -ts recent` всё ещё показывает AVC
-`denied { entrypoint }` для force-dsc.sh, проверь время записи. На этой
-установке найденный AVC был от ПРЕДЫДУЩЕЙ неудачной попытки прямого ExecStart
-в 01:04:27, а успешный service стартовал позже, в 01:06:20.
-
-То есть старый AVC в окне "recent" не означает, что текущий запуск снова
-сломался.
-
-Финальная проверка persistence:
-
-systemctl reboot
-
-После загрузки НИЧЕГО DSC вручную не запускать.
-Подождать примерно 45-60 секунд и посмотреть:
-
-cat /var/lib/honor/health-last.txt
-
-Хотим:
-
-[ OK ] DSC force enabled
-[ OK ] DSC active
-[ OK ] display: bpp=30, dither=no
 RESULT: OK
-
-Отдельно можно подтвердить service:
-
-systemctl is-active honor-force-dsc.service
-
-Ожидаем:
-
-active
-
-======================================================================
-ОЖИДАЕМЫЙ ИТОГ
-======================================================================
-
-После всего гайда:
-
-- keyboard работает;
-- touchscreen работает;
-- touchpad работает;
-- левый край touchpad меняет яркость;
-- правый край меняет громкость;
-- phantom micmute отсутствует;
-- Fn micmute работает нормально;
-- fingerprint enroll/verify работает;
-- Wi-Fi/Bluetooth остаются штатными;
-- камера остаётся штатной;
-- speakers/internal mic остаются штатными;
-- OLED 3120x2080 @ 120 Hz;
-- PSR1;
-- DSC;
-- 10-bit;
-- bpp=30;
-- dither=no.
-
-И всё это БЕЗ:
-- custom Bazzite image;
-- kernel rebuild;
-- patched xe.ko.
-
-
-======================================================================
-ИСТОЧНИКИ / ПОЧЕМУ ТАК
-======================================================================
-
-HONOR fixes:
-https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010
-
-Bazzite package layering:
-https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/
-
-Bazzite dracut / initramfs:
-https://docs.bazzite.gg/Advanced/dracut-and-initramfs/
-
-dracut ACPI override:
-https://dracut-ng.github.io/dracut/man/dracut.conf.5.html
-
-rpm-ostree admin handbook:
-https://coreos.github.io/rpm-ostree/administrator-handbook/
