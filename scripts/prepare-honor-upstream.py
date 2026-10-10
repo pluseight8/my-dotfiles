@@ -52,6 +52,30 @@ for rel, content in recipes.items():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(content)
 
+# ----- HID-BPF: use matching local Bazzite kernel-devel, no external mirror --
+fetch_block = '''ksrc_resolve
+log "headers = ${KSRC_TAG}"
+for h in hid_bpf.h hid_bpf_helpers.h hid_report_descriptor_helpers.h; do
+    ksrc_fetch "drivers/hid/bpf/progs/${h}" "${WORK}/${h}"
+done
+'''
+local_block = '''KBUILD="/lib/modules/${KVER}/build"
+log "headers = local matching kernel-devel: ${KBUILD}"
+for h in hid_bpf.h hid_bpf_helpers.h hid_report_descriptor_helpers.h; do
+    src="${KBUILD}/drivers/hid/bpf/progs/${h}"
+    [[ -f "$src" ]] || die "matching Bazzite kernel-devel is missing $src"
+    cp "$src" "${WORK}/${h}"
+done
+'''
+for rel in ("patch/micmute/install.sh", "patch/touchpad-edge/install.sh"):
+    f = repo / rel
+    data = f.read_text()
+    if fetch_block in data:
+        data = data.replace(fetch_block, local_block, 1)
+    elif "headers = local matching kernel-devel" not in data:
+        raise SystemExit(f"{rel}: kernel-header fetch block no longer matches audited upstream")
+    f.write_text(data)
+
 # ----- fingerprint: immutable /usr ------------------------------------------
 fp = repo / "patch/fingerprint/install.sh"
 s = fp.read_text()
@@ -122,7 +146,7 @@ subprocess.run(["git", "config", "user.email", "honor-m1230@localhost"], cwd=rep
 subprocess.run(["git", "add", "devices/zqc-p.conf", "patch/acpi-override/zqc-p/M1230/recipe.conf",
                 "patch/psr-band/zqc-p/M1230/recipe.conf", "patch/micmute/zqc-p/M1230/recipe.conf",
                 "patch/touchpad-edge/zqc-p/M1230/recipe.conf", "patch/fingerprint/zqc-p/M1230/recipe.conf",
-                "patch/fingerprint/install.sh", "patch/touchpad-edge/install.sh"], cwd=repo, check=True)
+                "patch/fingerprint/install.sh", "patch/touchpad-edge/install.sh", "patch/micmute/install.sh"], cwd=repo, check=True)
 if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo).returncode != 0:
     subprocess.run(["git", "commit", "-m", "local: M1230 Bazzite adaptation"], cwd=repo, check=True)
 
