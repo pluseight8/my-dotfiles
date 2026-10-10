@@ -1,10 +1,10 @@
 [Unit]
 Description=Force DSC on HONOR ZQC-P M1230 internal eDP panel
-After=display-manager.service
+After=systemd-modules-load.service
+Before=display-manager.service
 
 [Service]
 Type=oneshot
-SELinuxContext=system_u:system_r:unconfined_service_t:s0
 ExecStart=/usr/bin/bash /usr/local/lib/honor/force-dsc.sh
 RemainAfterExit=yes
 

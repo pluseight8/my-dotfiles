@@ -1,76 +1,56 @@
-# HONOR MagicBook Pro 14 2026 AI (ZQC-P / M1230) — Bazzite setup
+# HONOR MagicBook Pro 14 2026 AI (ZQC-P / M1230) — Omarchy
 
-Personal, fail-closed hardware setup for **Bazzite KDE** on the exact laptop:
+Hardware bring-up for the exact laptop:
 
-- vendor: `HONOR`
-- product: `ZQC-P`
-- board: `M1230`
-- board name: `ZQC-P-PCB`
-- touchscreen: `2808:5662`
-- touchpad: `27c6:0f9a`
-- fingerprint: `1c7a:05aa`
+- HONOR / ZQC-P / M1230 / ZQC-P-PCB
+- Intel Panther Lake / Arc B390
+- FocalTech touchscreen `2808:5662`
+- Goodix touchpad `27c6:0f9a`
+- EgisTec ET171 fingerprint `1c7a:05aa`
+- 3120×2080 120 Hz OLED
 
-The old CachyOS/DriftWM material is preserved in
-`backup/pre-bazzite-honor-overhaul-2026-10-10`.
+This branch is built for **Omarchy Quattro / Arch**, not Bazzite. The previous
+Bazzite implementation is preserved in
+`backup/pre-omarchy-overhaul-2026-10-10`.
 
-## What it installs
+## Goal
 
-- byte-verified ACPI `I2C_DEVT` override;
+Restore and integrate the hardware features already proven on this exact M1230:
+
+- ACPI I2C fix for touchscreen + touchpad;
 - `xe.enable_psr=1`;
-- HID-BPF mic-mute descriptor fix;
-- HID-BPF left-edge touchpad brightness gesture;
-- private patched SDCP libfprint for EgisTec `1c7a:05aa`;
-- M1230-only keyboard-backlight LED driver for KDE/UPower;
-- forced DSC through the Bazzite OGC kernel debugfs interface;
-- boot health check with `RESULT: OK/FAIL`.
+- micmute HID-BPF descriptor fix;
+- touchpad left-edge brightness gesture;
+- EgisTec SDCP fingerprint support;
+- keyboard backlight exposed as `honor::kbd_backlight`;
+- Omarchy-native keyboard brightness through `omarchy-brightness-keyboard`;
+- DSC + 10-bit output when the current `linux-omarchy` kernel exposes the
+  required debugfs control;
+- persistent boot health check.
 
-## Important design rule
+## Design rule
 
-**No script in this repository installs RPM packages or performs a reboot.**
+**Nothing hides package installation or reboot-required boot changes.**
 
-All boot-affecting steps are explicit and manual:
+Package installation is a manual `pacman` command from the guide.
+`preflight.sh` validates the machine and prepares pinned source only. ACPI,
+mkinitcpio, Limine and PSR commands are explicit in the guide. You run
+`limine-mkinitcpio` and every reboot yourself. `install.sh` is post-reboot
+runtime setup only: no package install, no bootloader/initramfs mutation, no
+reboot.
 
-1. you manually run the documented `rpm-ostree install` dependency transaction;
-2. you inspect `rpm-ostree status` and reboot yourself;
-3. you run `preflight.sh`, which only validates hardware/firmware and prepares
-   the pinned support source;
-4. you manually stage ACPI/initramfs/PSR commands from `docs/INSTALL.md`;
-5. you inspect `rpm-ostree status` and reboot yourself again;
-6. only then you run `install.sh`, which is strictly post-reboot/runtime setup;
-7. after it succeeds, you choose when to do the final persistence reboot.
+Start with [`docs/INSTALL.md`](docs/INSTALL.md).
 
-`install.sh` contains **no `rpm-ostree` command and no reboot command**.
+## Source policy
 
-## Start here
+All Omarchy behavior in this port was derived from the official Omarchy site,
+manual, `omacom/omarchy`, `omacom/omarchy-iso` and
+`omacom/omarchy-pkgs`. Official Arch package pages were used only to verify
+Arch package/CLI details.
 
-Read [`docs/INSTALL.md`](docs/INSTALL.md) from top to bottom.
+The model-specific HONOR payload is the same pinned hardware-support code already
+validated on this exact M1230 during the previous bring-up; it is not treated as
+an authority on Omarchy.
 
-The post-reboot runtime install command is:
-
-```bash
-sudo ./install.sh --yes
-```
-
-Do not enable Secure Boot for this tested setup: the local ACPI override and
-out-of-tree keyboard-backlight module are intentionally fail-closed when kernel
-lockdown is active.
-
-## Safety model
-
-The setup refuses to continue when DMI does not match M1230, Secure Boot or
-lockdown is active, required packages are missing, live ACPI bytes differ from
-the audited reference, the pinned support source changes, or a required
-post-reboot check fails.
-
-No `curl | bash`, no global SELinux disable, no `rpm-ostree reset`, no automatic
-package layering, no automatic reboot, no custom `xe.ko`, and no blind reuse of
-EC offsets from another board revision.
-
-See:
-
-- [`docs/INSTALL.md`](docs/INSTALL.md)
-- [`docs/AUDIT.md`](docs/AUDIT.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/UPDATES.md`](docs/UPDATES.md)
-- [`docs/BIOS-UPDATE.md`](docs/BIOS-UPDATE.md)
-- [`docs/OFFICIAL-SOURCES.md`](docs/OFFICIAL-SOURCES.md)
+See [`docs/OFFICIAL-SOURCES.md`](docs/OFFICIAL-SOURCES.md) and
+[`docs/AUDIT.md`](docs/AUDIT.md).

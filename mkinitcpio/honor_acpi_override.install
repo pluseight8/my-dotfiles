@@ -1,0 +1,13 @@
+#!/usr/bin/bash
+
+build() {
+    local aml=/usr/lib/firmware/acpi/SSDT27_TPD0.aml
+    [[ -f "$aml" ]] || return 1
+    add_file_early "$aml" /kernel/firmware/acpi/SSDT27_TPD0.aml 644
+}
+
+help() {
+    cat <<'EOF'
+Add the audited HONOR ZQC-P M1230 SSDT override to mkinitcpio's early CPIO.
+EOF
+}

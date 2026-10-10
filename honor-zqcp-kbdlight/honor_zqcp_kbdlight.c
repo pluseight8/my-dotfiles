@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Keyboard backlight LED driver for HONOR ZQC-P / M1230.
+ * HONOR ZQC-P / M1230 keyboard backlight LED driver.
  *
- * KBBL EC mapping verified on the target machine:
+ * Verified EC KBBL mapping:
  *   0x04 = off
  *   0x02 = low
  *   0x03 = high
  *   0x01 = latch current level
  *
- * Deliberately no periodic EC polling. Firmware Fn+Space remains independent;
- * KDE/UPower controls this LED class device directly.
+ * No periodic EC polling. Omarchy's omarchy-brightness-keyboard finds any
+ * *kbd_backlight* LED and can therefore control this device directly.
  */
 
 #include <linux/module.h>
@@ -74,12 +74,14 @@ static enum led_brightness kbd_get(struct led_classdev *cdev)
     return cur_bright;
 }
 
-static ssize_t mode_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t mode_show(struct device *dev,
+                         struct device_attribute *attr, char *buf)
 {
     return sysfs_emit(buf, "%s\n", steady ? "steady" : "reactive");
 }
 
-static ssize_t mode_store(struct device *dev, struct device_attribute *attr,
+static ssize_t mode_store(struct device *dev,
+                          struct device_attribute *attr,
                           const char *buf, size_t count)
 {
     if (sysfs_streq(buf, "steady"))
@@ -143,6 +145,7 @@ static int __init kbdlight_init(void)
     }
 
     INIT_DELAYED_WORK(&latch_work, latch_fn);
+
     pdev = platform_device_register_simple("honor-zqcp-kbdlight", -1, NULL, 0);
     if (IS_ERR(pdev))
         return PTR_ERR(pdev);
@@ -170,4 +173,4 @@ module_exit(kbdlight_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Keyboard backlight LED driver for HONOR ZQC-P M1230");
-MODULE_AUTHOR("pluseight8 M1230 Bazzite setup");
+MODULE_AUTHOR("pluseight8 M1230 Omarchy setup");

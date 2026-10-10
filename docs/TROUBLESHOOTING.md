@@ -1,51 +1,47 @@
 # Troubleshooting
 
-Start with the single report:
+Start with:
 
 ```bash
 cat /var/lib/honor/health-last.txt
 ```
 
-Then inspect the installer log:
+Then:
 
 ```bash
 sudo less /var/log/honor-m1230-install.log
 ```
 
-## install.sh says the manual boot stage is not active
-
-`install.sh` does not repair boot state and does not call `rpm-ostree`.
-
-Check the current boot:
+## ACPI/touch devices
 
 ```bash
 sudo journalctl -k -b --no-pager | \
   grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL|locked down'
 
+ls /sys/bus/hid/devices | grep -iE '2808:5662|27C6:0F9A'
+```
+
+If the HID devices are missing, fix ACPI before touching HID-BPF.
+
+## PSR
+
+```bash
 cat /sys/module/xe/parameters/enable_psr
+cat /etc/limine-entry-tool.d/90-honor-m1230.conf
 ```
 
-If the ACPI override is not active or PSR is not `1`, go back to the manual
-boot-staging block in `docs/INSTALL.md`, inspect `rpm-ostree status`, and reboot
-yourself.
-## ACPI override did not load
+Expected runtime value: `1`.
+
+## HID-BPF
 
 ```bash
-sudo journalctl -k -b --no-pager | \
-  grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL|locked down'
+test -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o && echo micmute-ok
+test -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o && echo edge-ok
+systemctl status honor-hid-bpf-reapply.service --no-pager -l
+udev-hid-bpf list-devices
 ```
 
-Do not force the override if the installer's live/reference ACPI hashes do not
-match.
-
-## Touchscreen or touchpad missing
-
-```bash
-ls /sys/bus/hid/devices | grep -iE '2808:5662|27c6:0f9a'
-```
-
-If they are absent, fix ACPI first. Do not debug HID-BPF until the physical HID
-devices enumerate.
+Do not use the obsolete `list-loaded` command.
 
 ## Keyboard backlight
 
@@ -62,7 +58,11 @@ sleep 1
 echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
 ```
 
-If the direct test works but KDE does not, restart UPower and PowerDevil.
+Omarchy test:
+
+```bash
+omarchy-brightness-keyboard cycle
+```
 
 ## DSC
 
@@ -71,21 +71,20 @@ systemctl status honor-force-dsc.service --no-pager -l
 sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
 ```
 
-A healthy state contains:
+Then:
 
-```text
-DSC_Enabled: yes
-Force_DSC_Enable: yes
-bpp=30
-dither=no
+```bash
+DSC_FILE=$(sudo find /sys/kernel/debug/dri \
+  -path '*/eDP-*/i915_dsc_fec_support' -print -quit)
+sudo cat "$DSC_FILE"
+
+DISPLAY_INFO=$(sudo find /sys/kernel/debug/dri -name i915_display_info -print -quit)
+sudo grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO"
 ```
 
-Do not disable SELinux to make the service work. The shipped unit already uses
-the tested per-service SELinux context.
+Final healthy boot: DSC enabled/forced, `bpp=30`, `dither=no`.
 
 ## Fingerprint
-
-Check the USB reader and private library:
 
 ```bash
 lsusb -d 1c7a:05aa
@@ -93,5 +92,8 @@ ldconfig -p | grep /opt/honor-libfprint-sdcp
 systemctl status fprintd --no-pager -l
 ```
 
-If the USB device itself disappears, a complete power-off is more meaningful
-than repeatedly rebuilding libfprint.
+Then use Omarchy's own flow:
+
+```bash
+omarchy-setup-security-fingerprint
+```

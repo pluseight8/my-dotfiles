@@ -1,186 +1,140 @@
-# Repository and installer audit
+# Audit — Omarchy / HONOR M1230
 
-Audit target: the Bazzite/HONOR repository after the 2026-10-10 overhaul.
+Audit target: this repository after the Omarchy port.
 
-## Result
+## Scope
 
-**Static repository audit: PASS (GitHub Actions)**, subject to the residual hardware/update risks
-listed below.
+The repository is intentionally specific to:
 
-Run it locally at any time:
+- HONOR ZQC-P / board M1230;
+- supported Omarchy ISO installation;
+- Omarchy's default x86_64 `linux-omarchy` kernel family;
+- the exact hardware IDs recorded in `config/m1230.env`.
 
-```bash
-bash scripts/audit.sh
-```
+The previous Bazzite implementation is preserved in
+`backup/pre-omarchy-overhaul-2026-10-10` and is not mixed into this main branch.
 
-A GitHub Actions workflow runs the same self-contained audit on every push and
-pull request.
+## Omarchy integration
 
-## Scope cleanup
+### Official-source usage — PASS
 
-The old repository mixed CachyOS/DriftWM dotfiles, scratch files, office data
-and several obsolete installation transcripts. The Bazzite overhaul removes
-those from `main`. They remain recoverable in:
+Omarchy behavior was derived only from the official site/manual and official
+`omacom` repositories. Current Arch package details came only from official
+Arch package/manual pages.
 
-`backup/pre-bazzite-honor-overhaul-2026-10-10`
+### Package boundary — PASS
 
-The new `main` has one purpose: this exact HONOR M1230 on Bazzite.
+No repository script runs `pacman -S`. The user installs the explicitly listed
+dependencies manually.
 
-## Bazzite integration audit
+`install.sh` only queries/uses already installed packages.
 
-### Package management — PASS
+### Boot boundary — PASS
 
-Bazzite's official documentation says package layering is a last resort and can
-block future updates. This setup layers only tools that must operate on the host
-kernel/udev/PAM stack, but **the repository never performs that layering**.
+No repository script runs `systemctl reboot`.
 
-The user runs the documented `rpm-ostree install` transaction manually, checks
-`rpm-ostree status`, and reboots manually. `install.sh` only verifies that the
-required RPMs are present. There is no dependency-installer helper and no
-automatic dependency cleanup helper.
+`preflight.sh` does not modify Limine or mkinitcpio configuration.
 
-This keeps package ownership outside the HONOR hardware installer and makes
-every host package mutation explicit.
-### Kernel-devel — PASS
+The ACPI hook, Limine cmdline drop-in, `limine-mkinitcpio` invocation and both
+validation reboots are explicit commands in `docs/INSTALL.md`.
 
-The installer does not layer an arbitrary Fedora kernel-devel. The official
-Bazzite build installs and version-locks its kernel and matching kernel-devel.
-The setup only proceeds when the running `/lib/modules/<release>/build/Makefile`
-exists.
+`install.sh` contains no Limine/mkinitcpio mutation and runs only after the ACPI
+override and PSR setting are already active.
 
-### Initramfs — NECESSARY EXCEPTION
+### Omarchy kernel integration — PASS
 
-Bazzite documentation warns that local initramfs customization slows image
-updates and recommends kernel arguments where possible. PSR therefore uses
-`rpm-ostree kargs`; only the ACPI table uses local initramfs because an ACPI
-override cannot be expressed as a kernel argument.
+The port uses the matching `linux-omarchy-headers` tree. HID-BPF helper headers
+are read from `/usr/lib/modules/$(uname -r)/build` instead of fetched from a
+Linux mirror.
 
-### Update/rollback model — PASS
+The keyboard module rebuild service also targets the running kernel's matching
+build tree.
 
-The installer pins the pre-change deployment when possible. Bazzite's normal
-rollback mechanism remains intact; no `rpm-ostree reset` is used.
+### Omarchy keyboard integration — PASS
 
-## Hardware safety audit
+Official `omarchy-brightness-keyboard` discovers
+`/sys/class/leds/*kbd_backlight*`. The local DMI-bound module exposes
+`honor::kbd_backlight`, so no edit to `/usr/share/omarchy` or user Hyprland
+config is required.
+
+### Omarchy fingerprint integration — PASS WITH EXTERNAL DRIVER RISK
+
+Omarchy's official `omarchy-setup-security-fingerprint` remains responsible for
+enrollment, sudo/polkit PAM and lock-screen integration.
+
+The exact EgisTec ET171 `1c7a:05aa` still uses the already-tested private SDCP
+libfprint build under `/opt`. This is the largest compatibility risk after a
+future libfprint/fprintd update.
+
+## Hardware safety
 
 ### DMI gate — PASS
 
-Every destructive host path is gated to `HONOR / ZQC-P / M1230`. The keyboard
-module has an independent in-kernel DMI table and the HONOR upstream adapter adds
-an M1230-specific device profile.
+Preflight and the keyboard module independently require HONOR / ZQC-P / M1230.
 
 ### ACPI gate — PASS
 
-The installer does not trust DMI alone. It:
+Before the guide tells the user to copy an AML, preflight:
 
-1. finds the live SSDT by OEM id `I2C_DEVT`;
-2. verifies the pinned stock file's known MD5;
-3. verifies the pinned patched file's known MD5;
-4. compares the live firmware table to the stock reference;
-5. stops on any mismatch.
+1. finds the live SSDT by OEM table ID `I2C_DEVT`;
+2. verifies the known stock reference MD5;
+3. verifies the known patched AML MD5;
+4. requires live bytes to match the stock reference exactly.
 
-No `FORCE_ACPI=1` escape is used.
-
-### BIOS update behavior — PASS WITH PROCEDURE
-
-A firmware update can invalidate the ACPI assumption before Linux has a chance
-to run the normal health check. BIOS preparation is documented as explicit
-manual commands in `docs/BIOS-UPDATE.md`; there is no script that silently
-changes the next boot. After the BIOS update, `preflight.sh` must revalidate the
-new live ACPI bytes before the user manually restages the override.
+No force switch bypasses this.
 
 ### HID-BPF — PASS
 
-Installed objects are tied to the observed touchscreen/touchpad IDs. The
-obsolete `udev-hid-bpf list-loaded` verification is removed from the pinned
-upstream adapter because current Bazzite/Fedora tooling does not expose it.
+The M1230 profile pins the exact touchscreen/touchpad IDs. The adapter removes
+the obsolete `list-loaded` verification and builds against local Omarchy kernel
+headers.
 
-### Fingerprint — PASS WITH EXTERNAL CODE RISK
+### Keyboard EC driver — PASS
 
-The Bazzite immutable `/usr` failure is fixed by staging Meson installation with
-`DESTDIR`, then copying only the private `/opt` prefix and generated udev rule to
-writable persistent paths. The SDCP source is already pinned by the hardware
-support recipe.
+The module:
 
-Residual risk: the SDCP implementation is not part of a released system
-libfprint. A future fprintd/libfprint ABI change can require rebuilding or
-rebasing the private library. The health check detects disappearance from the
-loader cache but cannot prove every future ABI behavior in advance.
+- is DMI-bound to M1230;
+- requires the expected DSDT symbols before installation;
+- uses the already-validated KBBL mapping;
+- performs no periodic Fn+Space polling.
 
-### Keyboard backlight — PASS
+### DSC — FAIL-CLOSED
 
-The driver is DMI-bound, checks expected DSDT symbols, does not modify brightness
-on module load, and carries no periodic EC polling. The build service applies
-SELinux `modules_object_t` before `insmod` and rebuilds on kernel-release change.
+Preflight requires `i915_dsc_fec_support` and DSC sink support on the currently
+running Omarchy kernel before any boot changes are staged.
 
-### DSC — PASS WITH ISOLATED PRIVILEGE
+The installed oneshot runs before the display manager. The final boot health
+check requires DSC active, force enabled, `bpp=30` and `dither=no`.
 
-No custom `xe.ko` is installed. The current OGC kernel's debugfs switch is used.
-The tested SELinux policy blocks `init_t` from writing `debugfs_t`; the service
-therefore runs only this root-owned oneshot in Fedora's existing
-`unconfined_service_t`. SELinux remains globally Enforcing.
+Unlike the former Bazzite setup, there is no Fedora SELinux-specific context.
 
-Security trade-off: that one process is unconfined while it runs. The helper is
-root-owned, short-lived, has no network access, accepts no input, writes only the
-located eDP DSC control, and exits immediately.
+## Static CI checks
 
-## Script audit
+`scripts/audit.sh` verifies:
 
-### Error handling — PASS
+- Bash syntax for every shell script;
+- Python syntax;
+- no Bazzite/rpm-ostree/dracut/Fedora package logic in scripts;
+- no automatic reboot command;
+- no package-install command in `install.sh` or `preflight.sh`;
+- no Limine/mkinitcpio mutation in `install.sh`;
+- source commit/tree and ACPI hashes are pinned;
+- DMI guard and no-poll keyboard driver;
+- DSC unit ordering;
+- official-source URL allowlist;
+- ShellCheck warning/error level;
+- Git whitespace.
 
-Mutation scripts use `set -euo pipefail`, explicit gates, a single-install lock,
-root checks and fail-closed validation. Network-dependent hardware builds retry
-three times before stopping.
+## Residual risks
 
-### Reboot boundary — PASS
-
-No executable script performs `systemctl reboot` and `install.sh` contains no
-`rpm-ostree` command at all.
-
-The dependency deployment is staged manually by the user. The ACPI/initramfs
-and PSR deployment is also staged manually after a non-mutating preflight. The
-user inspects `rpm-ostree status` before each reboot.
-
-`install.sh` is post-reboot/runtime-only. The final clean reboot is an explicit
-user action used only to prove persistence through the health-check timer.
-### Destructive path handling — PASS
-
-There is no global `rpm-ostree reset`, no global SELinux disable and no raw
-absolute `sudo rm -rf`. Managed tree deletion goes through a path guard limited
-to dedicated `/var/opt` or installer-state paths.
-
-### Source pinning — PASS
-
-The HONOR support source is pinned to a full commit SHA. The adaptation script
-also refuses to operate when HEAD differs from the audited commit or when exact
-installer snippets have drifted.
-
-## Static checks performed
-
-- `bash -n` over every shell script;
-- Python bytecode compilation for the adapter;
-- forbidden-pattern scan, including assertions that scripts never run `rpm-ostree install`, no script auto-reboots, and `install.sh` contains no `rpm-ostree` command;
-- pin/hash presence checks;
-- systemd DSC context/entrypoint checks;
-- keyboard-module DMI/no-poll checks;
-- official-source document host allowlist;
-- optional ShellCheck when installed;
-- `git diff --check` in a real checkout.
-
-## Residual risks that cannot be scripted away
-
-1. A future Bazzite kernel can change an internal API used by the tiny keyboard
-   module. Rebuild will then fail rather than load an incompatible module.
-2. A future OGC kernel can remove or rename `i915_dsc_fec_support`. The DSC
-   service and health check will fail visibly rather than patching a module.
-3. A future libfprint/fprintd change can invalidate the private SDCP build.
-4. A BIOS update can change ACPI/EC. Use the BIOS-update procedure first.
-5. Hardware vendors can silently change components under the same retail model.
-   The device IDs and ACPI-byte checks are there specifically to stop on that
-   case.
-
-## CI supply-chain note
-
-The GitHub Actions checkout action is pinned to an exact commit SHA rather than
-a mutable version tag. The audit job has passed on the rebuilt Bazzite-only
-`main` branch, including Bash parsing, Python compilation, warning/error-level
-ShellCheck, policy scans and whitespace checks.
+1. A future `linux-omarchy` kernel can change an internal kernel API used by the
+   tiny keyboard module. The service should fail to build rather than load a
+   mismatched module.
+2. A future kernel can remove/rename the DSC debugfs control. Preflight/health
+   check then fail visibly.
+3. A future libfprint/fprintd update can become ABI-incompatible with the private
+   SDCP build.
+4. A BIOS update can change ACPI/EC. Follow `docs/BIOS-UPDATE.md` first.
+5. This Omarchy port is statically audited against current official sources but
+   must still be live-validated on the actual M1230. The definitive acceptance
+   criterion is the first clean-boot `RESULT: OK`.

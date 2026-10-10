@@ -15,60 +15,18 @@ require_root() {
 }
 
 require_cmds() {
-    local missing=() c
-    for c in "$@"; do
-        command -v "$c" >/dev/null 2>&1 || missing+=("$c")
+    local missing=() cmd
+    for cmd in "$@"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
     done
     ((${#missing[@]} == 0)) || die "missing command(s): ${missing[*]}"
 }
 
-REQUIRED_HOST_PACKAGES=(
-    git
-    udev-hid-bpf
-    fprintd
-    fprintd-pam
-    authselect
-    gcc
-    make
-    mokutil
-    clang
-    bpftool
-    libbpf-devel
-    meson
-    ninja-build
-    pkgconf-pkg-config
-    glib2-devel
-    libgusb-devel
-    nss-devel
-    libgudev-devel
-    gobject-introspection-devel
-    cairo-devel
-    pixman-devel
-    polkit-devel
-    usbutils
-)
-
-assert_host_dependencies_present() {
-    require_cmds rpm
-    local missing=() pkg
-    for pkg in "${REQUIRED_HOST_PACKAGES[@]}"; do
-        rpm -q "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
-    done
-
-    if ((${#missing[@]})); then
-        printf 'Missing host package(s):\n' >&2
-        printf '  %s\n' "${missing[@]}" >&2
-        die "install the dependencies manually with rpm-ostree, reboot, then run this installer again. See docs/INSTALL.md"
-    fi
-}
-
-is_bazzite() {
-    [[ -r /etc/os-release ]] || return 1
-    grep -qiE '(^ID=bazzite$|^NAME=.*Bazzite)' /etc/os-release
-}
-
-assert_bazzite() {
-    is_bazzite || die "this installer is only for Bazzite"
+assert_omarchy() {
+    command -v omarchy >/dev/null 2>&1 || die "Omarchy CLI not found"
+    [[ -r /usr/share/omarchy/default/bash/env-bootstrap ]] || die "/usr/share/omarchy is missing; use a supported Omarchy ISO installation"
+    command -v pacman >/dev/null 2>&1 || die "pacman missing; this is not the expected Omarchy/Arch host"
+    command -v limine-mkinitcpio >/dev/null 2>&1 || die "limine-mkinitcpio missing; update Omarchy before continuing"
 }
 
 read_dmi() {
@@ -86,81 +44,57 @@ assert_m1230() {
 
     [[ "$vendor" == "$HONOR_DMI_VENDOR" ]] || die "unexpected vendor: $vendor"
     [[ "$product" == "$HONOR_DMI_PRODUCT" ]] || die "unexpected product: $product"
-    [[ "$board" == "$HONOR_DMI_BOARD" ]] || die "unexpected board: $board"
+    [[ "$board" == "$HONOR_DMI_BOARD" ]] || die "unexpected board version: $board"
     [[ "$board_name" == "$HONOR_DMI_BOARD_NAME" ]] || die "unexpected board name: $board_name"
     [[ -z "$sku" || "$sku" == "$HONOR_DMI_SKU" ]] || die "unexpected SKU: $sku"
 }
 
-assert_secure_boot_off() {
-    require_cmds mokutil
-    local sb lockdown
-    sb="$(mokutil --sb-state 2>/dev/null || true)"
+assert_lockdown_off() {
+    local lockdown
     lockdown="$(cat /sys/kernel/security/lockdown 2>/dev/null || true)"
-
-    grep -qi 'disabled' <<<"$sb" || die "Secure Boot must be disabled for this tested setup. Current state: ${sb:-unknown}"
     [[ -z "$lockdown" || "$lockdown" == *'[none]'* ]] || die "kernel lockdown is active: $lockdown"
-}
-
-assert_selinux_enforcing() {
-    local mode
-    mode="$(getenforce 2>/dev/null || true)"
-    [[ "$mode" == "Enforcing" ]] || die "tested Bazzite path expects SELinux Enforcing; current: ${mode:-unknown}"
 }
 
 assert_kernel_build_tree() {
     local kver
     kver="$(uname -r)"
-    [[ -f "/lib/modules/$kver/build/Makefile" ]] || die "matching kernel-devel tree missing: /lib/modules/$kver/build"
+    [[ -f "/usr/lib/modules/$kver/build/Makefile" ]] || die "matching kernel headers missing: /usr/lib/modules/$kver/build"
+    pacman -Q linux-omarchy-headers >/dev/null 2>&1 || die "linux-omarchy-headers package missing"
 }
 
-pending_deployment_exists() {
-    python3 - <<'PY'
-import json, subprocess, sys
-try:
-    data = json.loads(subprocess.check_output(["rpm-ostree", "status", "--json"], text=True))
-except Exception:
-    sys.exit(2)
-for d in data.get("deployments", []):
-    if d.get("staged"):
-        sys.exit(0)
-sys.exit(1)
-PY
-}
+REQUIRED_PACKAGES=(
+    base-devel
+    git
+    clang
+    bpf
+    udev-hid-bpf
+    meson
+    ninja
+    pkgconf
+    glib2
+    libgusb
+    nss
+    libgudev
+    gobject-introspection
+    cairo
+    pixman
+    polkit
+    fprintd
+    libfprint-git
+    usbutils
+    linux-omarchy-headers
+)
 
-assert_no_pending_deployment() {
-    local rc=0
-    pending_deployment_exists || rc=$?
-    case "$rc" in
-        0) die "rpm-ostree already has a staged deployment. Reboot into it before running this installer." ;;
-        1) return 0 ;;
-        *) die "could not inspect rpm-ostree deployment state" ;;
-    esac
-}
-
-state_file="$HONOR_STATE_DIR/install.env"
-
-state_init() {
-    install -d -m755 "$HONOR_STATE_DIR"
-    touch "$state_file"
-    chmod 600 "$state_file"
-}
-
-state_set() {
-    local key="$1" value="$2" tmp
-    state_init
-    tmp="$(mktemp "$HONOR_STATE_DIR/.state.XXXXXX")"
-    awk -F= -v k="$key" '$1 != k { print }' "$state_file" > "$tmp"
-    printf '%s=%q\n' "$key" "$value" >> "$tmp"
-    mv -f "$tmp" "$state_file"
-    chmod 600 "$state_file"
-}
-
-state_get() {
-    local key="$1"
-    [[ -r "$state_file" ]] || return 1
-    # shellcheck source=/dev/null
-    source "$state_file"
-    printf '%s' "${!key:-}"
+assert_dependencies_present() {
+    local missing=() pkg
+    for pkg in "${REQUIRED_PACKAGES[@]}"; do
+        pacman -Q "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
+    done
+    if ((${#missing[@]})); then
+        printf 'Missing package(s):\n' >&2
+        printf '  %s\n' "${missing[@]}" >&2
+        die "install dependencies manually as documented in docs/INSTALL.md"
+    fi
 }
 
 retry() {
@@ -171,7 +105,7 @@ retry() {
         if "$@"; then
             return 0
         fi
-        if (( i < attempts )); then
+        if ((i < attempts)); then
             warn "attempt $i/$attempts failed; retrying in ${delay}s: $*"
             sleep "$delay"
         fi
@@ -181,34 +115,18 @@ retry() {
 
 safe_rm_tree() {
     local path="$1"
-    [[ "$path" == /var/opt/* || "$path" == /var/lib/honor-m1230/* ]] || die "refusing unsafe rm -rf: $path"
-    [[ "$path" != /var/opt && "$path" != /var/lib/honor-m1230 ]] || die "refusing unsafe rm -rf: $path"
+    [[ "$path" == /var/opt/* ]] || die "refusing unsafe rm -rf: $path"
+    [[ "$path" != /var/opt ]] || die "refusing unsafe rm -rf: $path"
     rm -rf --one-file-system "$path"
 }
 
-user_uid() {
-    local user="$1"
-    id -u "$user"
-}
-
-restart_powerdevil_for_user() {
+restart_user_shell() {
     local user="$1" uid
-    uid="$(user_uid "$user")"
-    if [[ -S "/run/user/$uid/bus" ]]; then
+    uid="$(id -u "$user")"
+    if [[ -S "/run/user/$uid/bus" ]] && command -v omarchy-restart-shell >/dev/null 2>&1; then
         runuser -u "$user" -- env \
             XDG_RUNTIME_DIR="/run/user/$uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-            systemctl --user restart plasma-powerdevil.service >/dev/null 2>&1 || true
-    fi
-}
-
-notify_user() {
-    local user="$1" message="$2" uid
-    uid="$(user_uid "$user")"
-    if [[ -S "/run/user/$uid/bus" ]] && command -v notify-send >/dev/null 2>&1; then
-        runuser -u "$user" -- env \
-            XDG_RUNTIME_DIR="/run/user/$uid" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-            notify-send "HONOR M1230" "$message" >/dev/null 2>&1 || true
+            omarchy-restart-shell >/dev/null 2>&1 || true
     fi
 }

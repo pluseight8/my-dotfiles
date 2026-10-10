@@ -1,14 +1,18 @@
-# HONOR ZQC-P M1230 keyboard backlight
+# HONOR ZQC-P M1230 keyboard backlight — Omarchy
 
-Small out-of-tree LED-class driver used by this Bazzite setup. It is DMI-bound
-to `HONOR / ZQC-P / M1230`, checks the firmware DSDT for `KBBL/GKBM/SKBM`, and
-registers `honor::kbd_backlight` so UPower/KDE can control the physical keyboard
-backlight.
+Small DMI-bound LED-class driver for the keyboard backlight on this exact board.
 
-The boot service rebuilds the module when `uname -r` changes and labels the new
-`.ko` as `modules_object_t` before `insmod`, which is required by SELinux on the
-tested Bazzite system.
+It registers:
 
-There is intentionally no periodic EC polling. `Fn+Space` remains firmware-side
-and may not visually move the KDE slider; the slider itself still controls the
-hardware.
+`/sys/class/leds/honor::kbd_backlight`
+
+Omarchy's official `omarchy-brightness-keyboard` helper scans
+`/sys/class/leds/*kbd_backlight*`, so this name integrates directly with
+Omarchy's existing keyboard-brightness hotkeys.
+
+The systemd service keeps a source copy under `/var/lib/honor/kbdlight-src` and
+rebuilds the module when the running kernel release changes.
+
+There is intentionally no periodic EC polling. Firmware-side Fn+Space can change
+the physical backlight independently; that is preferable to a permanent polling
+loop merely to synchronize UI state.

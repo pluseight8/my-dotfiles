@@ -1,60 +1,91 @@
-# Official sources used for the Bazzite integration
+# Official sources used for the Omarchy port
 
-The Bazzite design and audit intentionally used official project sources only.
-No blogs, forum posts, Reddit threads, package-guide sites or generated how-to
-pages were used to decide how Bazzite itself should be modified.
+All claims about Omarchy itself were checked against official Omarchy material.
+No Reddit, forums, blogs, random setup guides, mirrors or third-party Omarchy
+tutorials were used.
 
-Reviewed on 2026-10-10:
+Reviewed: 2026-10-10.
 
-## Bazzite documentation
+## Official Omarchy website/manual
 
-- https://docs.bazzite.gg/
-- https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/
-- https://docs.bazzite.gg/Installing_and_Managing_Software/Homebrew/
-- https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/
-- https://docs.bazzite.gg/General/Installation_Guide/install-guide/
-- https://docs.bazzite.gg/Advanced/dracut-and-initramfs/
+- https://omarchy.org/
+- https://omarchy.org/manual/
+- https://omarchy.org/manual/getting-started/
+- https://omarchy.org/manual/updates/
+- https://omarchy.org/manual/system-snapshots/
+- https://omarchy.org/manual/security/
+- https://omarchy.org/manual/dotfiles/
+- https://omarchy.org/manual/omarchy-cli/
 
-Documentation repository revision reviewed:
+The official site offered Omarchy 4.0.4 when this port was prepared.
 
-`ublue-os/docs.bazzite.gg` @ `adb77da474d8da9f5bdd6b3fc6de4b7243cb9291`
+The official manual establishes the points this repository relies on:
 
-## Bazzite source repository
+- ISO installation is the normal supported path;
+- Secure Boot/TPM are disabled for installation;
+- Omarchy is Arch + Hyprland + Quickshell;
+- system updates go through `omarchy update` rather than direct `pacman -Syu`;
+- updates take a snapshot and run Omarchy migrations/config updates;
+- Limine snapshots are the supported rollback path;
+- user customizations belong outside `/usr/share/omarchy`.
 
-- https://github.com/ublue-os/bazzite
-- `build_files/install-kernel-akmods` — confirms Bazzite's image carries its
-  matching kernel-devel and version-locks the kernel/kernel-devel set.
-- `Containerfile` — confirms Bazzite enables its update/rollback health services
-  and SELinux-oriented image configuration.
-- Bazzite `ujust` source — confirms Bazzite itself uses `rpm-ostree kargs` for
-  persistent kernel-argument changes.
+## Official Omarchy repositories
 
-Repository revision reviewed:
+Main repository:
 
-`ublue-os/bazzite` @ `7f903b94e31461c92b93110a2cb3a33f9539942a`
+- https://github.com/omacom/omarchy
+- reviewed revision:
+  `077ac1da939de00d061c1035e1a1d00587a119b8`
 
-## Fedora SELinux policy source
+Relevant official source paths reviewed:
 
-The DSC service uses Fedora's existing `unconfined_service_t` domain rather than
-disabling SELinux or adding a broad `init_t -> debugfs_t` allow rule. The domain
-was verified in the official Fedora SELinux policy source:
+- `install/omarchy-base.packages`
+- `install/omarchy-other.packages`
+- `etc/mkinitcpio.conf.d/00-omarchy-hooks.conf`
+- `etc/limine-entry-tool.d/omarchy-defaults.conf`
+- `bin/omarchy-update`
+- `bin/omarchy-brightness-keyboard`
+- `bin/omarchy-setup-security-fingerprint`
+- `default/hypr/bindings/media.lua`
+- `docs/file-layout.md`
+- `agents/skills/install-scripts.md`
 
-- https://github.com/fedora-selinux/selinux-policy/blob/rawhide/policy/modules/system/unconfined.te
+Official package repository:
 
-## HONOR-specific code dependency
+- https://github.com/omacom/omarchy-pkgs
+- reviewed revision:
+  `0a906801f1a876a739a6de902c9a366d295f43c9`
 
-Bazzite does not provide model-specific support for this laptop. The HONOR
-hardware patch implementation is therefore a separate, pinned code dependency
-that had already been validated on this exact M1230 during bring-up. It is not
-used as a source for claims about Bazzite behavior.
+Relevant package source reviewed:
 
-The installer pins that dependency by commit SHA and applies fail-closed DMI and
-ACPI-byte checks before it can affect the host.
+- `pkgbuilds/linux-omarchy/PKGBUILD`
+- `pkgbuilds/linux-omarchy-bore/PKGBUILD`
+- `pkgbuilds/libfprint-git/PKGBUILD`
 
-## HID-BPF build headers
+The official Omarchy package list currently installs `linux-omarchy`,
+`linux-omarchy-headers`, Limine and the Limine mkinitcpio integration. The
+current `linux-omarchy` package line reviewed was based on Linux 7.2.8.
 
-The installer does not fetch Linux HID-BPF headers from a public mirror. It
-uses the exact source/header tree shipped with Bazzite's matching OGC
-`kernel-devel` at `/lib/modules/$(uname -r)/build`. This keeps the BPF build
-aligned with the running Bazzite kernel and removes a previously unnecessary
-external header source.
+## Official Arch package information
+
+Only official Arch package/manual pages were used to verify the current
+HID-BPF package/tool naming:
+
+- https://archlinux.org/packages/extra/x86_64/udev-hid-bpf/
+- https://man.archlinux.org/man/udev-hid-bpf.1.en
+- https://archlinux.org/packages/extra/x86_64/linux-tools/
+
+The current Arch `udev-hid-bpf` CLI exposes `add`/`remove` and does not document
+the obsolete `list-loaded` command used by older hardware scripts. This port
+therefore treats a successful `udev-hid-bpf add` as the live-attach result and
+lets udev handle persistence.
+
+## HONOR-specific payload
+
+Omarchy does not ship a hardware profile for this exact HONOR M1230. The
+model-specific ACPI/HID-BPF/EgisTec payload in this repository is based on the
+already-tested M1230 bring-up from the previous setup and is pinned by exact
+commit/tree/hash checks.
+
+It is deliberately **not** used as a source of truth about Omarchy. Omarchy
+integration decisions come only from the official sources above.

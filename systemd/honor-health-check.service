@@ -1,6 +1,6 @@
 [Unit]
-Description=HONOR ZQC-P M1230 health check
-After=display-manager.service honor-force-dsc.service honor-hid-bpf-reapply.service honor-zqcp-kbdlight.service
+Description=HONOR ZQC-P M1230 / Omarchy health check
+After=graphical.target honor-force-dsc.service honor-hid-bpf-reapply.service honor-zqcp-kbdlight.service
 
 [Service]
 Type=oneshot

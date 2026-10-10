@@ -1,7 +1,7 @@
 obj-m := honor_zqcp_kbdlight.o
 
 KVER ?= $(shell uname -r)
-KDIR ?= /lib/modules/$(KVER)/build
+KDIR ?= /usr/lib/modules/$(KVER)/build
 
 all:
 	$(MAKE) -C $(KDIR) M=$(CURDIR) modules
