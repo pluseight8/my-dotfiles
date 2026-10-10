@@ -44,8 +44,9 @@ check_absent 'curl[^\n]*\|[^\n]*(bash|sh)|wget[^\n]*\|[^\n]*(bash|sh)' 'no curl/
 check_absent 'sudo[[:space:]]+rm[[:space:]]+-rf[[:space:]]+/' 'no raw sudo rm -rf on absolute paths'
 
 # Explicit reboot/package boundary --------------------------------------------
+mapfile -t EXEC_SCRIPTS < <(find "$ROOT" -type f -name '*.sh' ! -name audit.sh -print)
 if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?systemctl[[:space:]]+reboot([[:space:]]|$)' \
-    $(find "$ROOT" -type f -name '*.sh' ! -name audit.sh -print) >/dev/null 2>&1; then
+    "${EXEC_SCRIPTS[@]}" >/dev/null 2>&1; then
     fail "a script automatically reboots the machine"
 else
     pass "no script automatically reboots the machine"
