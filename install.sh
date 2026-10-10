@@ -177,11 +177,11 @@ verify_after_acpi_reboot() {
 
 install_hid_bpf() {
     log "installing touchscreen micmute HID-BPF"
-    retry 3 10 env ALLOW_UNVERIFIED=1 HONOR_KSRC_REPO=gregkh/linux \
+    retry 3 10 env ALLOW_UNVERIFIED=1 \
         bash "$HONOR_UPSTREAM_DIR/patch/micmute/install.sh" || die "micmute HID-BPF install failed"
 
     log "installing touchpad left-edge brightness HID-BPF"
-    retry 3 10 env ALLOW_UNVERIFIED=1 HONOR_KSRC_REPO=gregkh/linux \
+    retry 3 10 env ALLOW_UNVERIFIED=1 \
         bash "$HONOR_UPSTREAM_DIR/patch/touchpad-edge/install.sh" || die "touchpad-edge HID-BPF install failed"
 
     [[ -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o ]] || die "micmute BPF object missing"
