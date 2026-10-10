@@ -4,7 +4,7 @@ Audit target: the Bazzite/HONOR repository after the 2026-10-10 overhaul.
 
 ## Result
 
-**Static repository audit: PASS**, subject to the residual hardware/update risks
+**Static repository audit: PASS (GitHub Actions)**, subject to the residual hardware/update risks
 listed below.
 
 Run it locally at any time:
@@ -169,3 +169,10 @@ installer snippets have drifted.
 5. Hardware vendors can silently change components under the same retail model.
    The device IDs and ACPI-byte checks are there specifically to stop on that
    case.
+
+## CI supply-chain note
+
+The GitHub Actions checkout action is pinned to an exact commit SHA rather than
+a mutable version tag. The audit job has passed on the rebuilt Bazzite-only
+`main` branch, including Bash parsing, Python compilation, warning/error-level
+ShellCheck, policy scans and whitespace checks.
