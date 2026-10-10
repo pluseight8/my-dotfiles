@@ -1,26 +1,38 @@
 # Installation
 
-This guide is for a fresh/current Bazzite KDE installation on HONOR ZQC-P board
-M1230. It is intentionally not portable to another HONOR model.
+This guide is for a fresh/current **Bazzite KDE** installation on
+**HONOR ZQC-P / M1230** only.
+
+The rule is simple:
+
+> **Every command that changes the next boot is run explicitly by you.**
+
+No repository script installs RPM packages. No repository script reboots the
+machine. `install.sh` is strictly post-reboot/runtime setup.
+
+---
 
 ## 0. Before starting
 
-Keep Secure Boot disabled for this setup. Bazzite itself supports Secure Boot,
-but this repository deliberately uses a local ACPI override plus a local
-out-of-tree kernel module. The installer checks `mokutil` and kernel lockdown
-and stops rather than silently installing a partially working setup.
+Keep Secure Boot disabled for this tested setup. Bazzite itself supports Secure
+Boot, but this machine setup uses a local ACPI override and a local out-of-tree
+keyboard-backlight module. The checks fail closed when kernel lockdown is
+active.
 
-Make sure there is no pending rpm-ostree deployment. If Bazzite has just updated,
-reboot into the newest deployment first.
+If Bazzite has just updated and `rpm-ostree status` shows a staged deployment,
+reboot into that deployment before starting.
 
-## 1. BEFORE THE FIRST REBOOT — you run everything manually
+Check:
 
-There is deliberately **no dependency installer script**. The HONOR installer
-does not execute `rpm-ostree install` and does not reboot the dependency
-deployment for you.
+```bash
+rpm-ostree status
+```
 
-Run this block yourself. It builds the package list, detects what is actually
-missing on the current Bazzite image, and only then stages those packages:
+---
+
+## 1. Manually install host dependencies
+
+Run this yourself. It calculates what is missing and stages only those RPMs:
 
 ```bash
 PKGS=(
@@ -61,131 +73,247 @@ if ((${#MISSING[@]})); then
 fi
 ```
 
-Nothing in this repository runs that transaction for you.
+The repository never runs this transaction for you.
 
-Now inspect what rpm-ostree staged:
+Inspect the staged deployment:
 
 ```bash
 rpm-ostree status
 ```
 
-If the new deployment looks correct, **you reboot manually**:
+If it looks correct, **you reboot manually**:
 
 ```bash
 systemctl reboot
 ```
 
-Bazzite requires a reboot for layered packages to become part of the active
-deployment. The Bazzite image already carries its matching OGC `kernel-devel`;
-the installer verifies `/lib/modules/$(uname -r)/build/Makefile` and refuses to
-substitute a random Fedora kernel-devel package.
-## 2. Clone this repository
+---
+
+## 2. Clone the Bazzite/HONOR repository
 
 After the dependency reboot:
 
 ```bash
 sudo git clone https://github.com/pluseight8/my-dotfiles.git \
   /var/opt/pluseight8-my-dotfiles
+
 sudo chown -R "$USER:$(id -gn)" /var/opt/pluseight8-my-dotfiles
+
 cd /var/opt/pluseight8-my-dotfiles
 ```
 
-## 3. One command
+If that directory already exists from a previous attempt, do not overwrite it
+blindly. Inspect it first.
+
+---
+
+## 3. Run the non-mutating hardware preflight
 
 ```bash
+sudo ./preflight.sh --yes
+```
+
+`preflight.sh` does **not** run `rpm-ostree`, does **not** modify initramfs,
+does **not** change kernel arguments, and does **not** reboot.
+
+It only:
+
+- verifies Bazzite;
+- verifies DMI is exactly HONOR / ZQC-P / M1230;
+- verifies Secure Boot/lockdown state;
+- verifies SELinux Enforcing;
+- verifies every required host RPM is already installed;
+- verifies the matching Bazzite OGC kernel build tree exists;
+- clones the HONOR support source at the exact audited commit;
+- applies the M1230/Bazzite source adaptations;
+- finds the live `I2C_DEVT` ACPI table;
+- compares the live table byte-for-byte with the audited stock reference;
+- verifies the stock and patched ACPI MD5 values.
+
+Expected end:
+
+```text
+PREFLIGHT: OK
+```
+
+If preflight does not say `OK`, stop. Do not stage the boot changes.
+
+---
+
+## 4. Manually stage the reboot-required HONOR boot changes
+
+These commands are deliberately **not hidden in a script**.
+
+First pin the currently working deployment:
+
+```bash
+sudo ostree admin pin 0
+```
+
+Install the already-validated ACPI override into persistent `/etc`:
+
+```bash
+sudo install -d -m755 /etc/honor-magicbook/acpi
+
+sudo install -m644 \
+  /var/opt/honor-magicbook-linux/patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml \
+  /etc/honor-magicbook/acpi/SSDT27_TPD0.aml
+
+sudo install -d -m755 /etc/dracut.conf.d
+
+sudo tee /etc/dracut.conf.d/90-honor-acpi.conf >/dev/null <<'EOF'
+acpi_override="yes"
+acpi_table_dir="/etc/honor-magicbook/acpi"
+EOF
+```
+
+Now explicitly enable the local initramfs deployment:
+
+```bash
+sudo rpm-ostree initramfs --enable
+```
+
+Normalize PSR so the next boot has exactly `xe.enable_psr=1`:
+
+```bash
+for arg in $(rpm-ostree kargs); do
+  case "$arg" in
+    xe.enable_psr=*)
+      if [ "$arg" != "xe.enable_psr=1" ]; then
+        sudo rpm-ostree kargs --delete-if-present="$arg"
+      fi
+      ;;
+  esac
+done
+
+sudo rpm-ostree kargs --append-if-missing="xe.enable_psr=1"
+```
+
+Inspect everything before rebooting:
+
+```bash
+rpm-ostree kargs
+rpm-ostree status
+```
+
+Only if it looks correct, **you reboot manually**:
+
+```bash
+systemctl reboot
+```
+
+---
+
+## 5. Post-reboot runtime installation
+
+After login:
+
+```bash
+cd /var/opt/pluseight8-my-dotfiles
 sudo ./install.sh --yes
 ```
 
-At startup the installer verifies that all required host packages are already
-present. If anything is missing, it exits with a list; it never installs the
-package for you. From this point it manages only the hardware setup and the
-reboots required to validate it.
+This is now a strict rule in the repository:
 
-### Stage 1
+- `install.sh` contains no `rpm-ostree` command;
+- `install.sh` contains no reboot command;
+- it refuses to continue if the manually staged ACPI/PSR state is not active.
 
-The script:
+It verifies:
 
-1. verifies Bazzite, DMI, Secure Boot/lockdown, SELinux and matching kernel build
-   tree;
-2. pins the current deployment as an emergency rollback point;
-3. clones the HONOR hardware-support source at an exact audited commit;
-4. applies only the M1230/Bazzite adaptations used on the tested machine;
-5. compares the live `I2C_DEVT` ACPI table byte-for-byte against the pinned stock
-   reference;
-6. verifies both known ACPI MD5s;
-7. installs the patched ACPI table into `/etc/honor-magicbook/acpi`;
-8. enables rpm-ostree local initramfs generation;
-9. sets only `xe.enable_psr=1` for PSR;
-10. installs a temporary resume service and reboots.
+- ACPI `Table Upgrade` is active;
+- no relevant `AE_AML_INTERNAL` returned;
+- touchscreen `2808:5662` exists;
+- touchpad `27c6:0f9a` exists;
+- `xe.enable_psr=1` is active.
 
-### Stage 2
+Then it installs only runtime/persistent hardware fixes:
 
-After reboot, systemd resumes automatically after the display manager and
-network are available. It first proves the ACPI override really loaded and both
-HID devices exist. Only then it installs:
-
-- touchscreen micmute HID-BPF;
-- touchpad left-edge brightness HID-BPF;
+- micmute HID-BPF;
+- touchpad-edge HID-BPF;
 - EgisTec SDCP fingerprint support;
-- M1230 keyboard-backlight kernel module;
+- M1230 keyboard-backlight module/service;
 - DSC service;
 - boot health-check timer.
 
-It restarts UPower and, when your user bus exists, KDE PowerDevil. The host
-packages you installed manually are left untouched. Then the machine reboots
-once more.
-
-### Stage 3
-
-After the final reboot the resume service runs the full health check. It only
-marks installation complete when every required check passes. The expected end
-is:
+It finishes by running the current-boot health check. Expected:
 
 ```text
+RUNTIME INSTALL: OK
 RESULT: OK
 ```
 
-The result is always saved at:
+At this point the fixes are active **without another forced reboot**.
 
-```bash
-cat /var/lib/honor/health-last.txt
-```
+---
 
-## 4. Fingerprint enrollment
+## 6. Fingerprint enrollment
 
-The driver installation is automatic. Enrolling a finger cannot be automated
-because the hardware physically needs multiple touches. Run once as your normal
-user:
+The driver is installed automatically, but your finger obviously must be
+enrolled interactively as your normal user:
 
 ```bash
 fprintd-enroll -f right-index-finger
 fprintd-verify
 ```
 
-`authselect enable-feature with-fingerprint` is attempted automatically during
-installation.
+---
 
-## 5. Keyboard backlight behavior
+## 7. Final persistence test — reboot only when YOU want
 
-KDE's keyboard-backlight slider controls `honor::kbd_backlight` and changes the
-physical backlight. Firmware `Fn+Space` also changes the physical backlight.
-They are intentionally not kept visually synchronized by periodic EC polling;
-that avoids a permanent wakeup loop just to move a UI slider.
+The final reboot is not needed to make the fixes active. It is only the clean
+persistence proof that everything comes back by itself.
 
-
-## 6. Package ownership
-
-Because you explicitly install the rpm-ostree packages yourself, the repository
-does not automatically uninstall them later either. Package layering stays a
-manual user decision in both directions.
-
-Inspect layered packages with:
+When you are ready:
 
 ```bash
-rpm-ostree status
+systemctl reboot
 ```
 
-If you later want to remove particular build dependencies, do it yourself with
-`rpm-ostree uninstall <package...>` and reboot. Keep `gcc` and `make` if you
-want the keyboard-backlight module to rebuild itself after a future kernel
-change.
+After login, wait roughly 45–60 seconds and run:
+
+```bash
+cat /var/lib/honor/health-last.txt
+```
+
+Expected final line:
+
+```text
+RESULT: OK
+```
+
+If `RESULT: OK`, the setup survived a completely clean boot.
+
+---
+
+## 8. Keyboard backlight behavior
+
+KDE controls the physical keyboard backlight through
+`/sys/class/leds/honor::kbd_backlight`.
+
+Firmware `Fn+Space` also changes the physical backlight. They are intentionally
+not synchronized through periodic EC polling, so using `Fn+Space` can leave the
+visual KDE slider temporarily out of sync. This avoids a permanent polling loop
+and unnecessary wakeups.
+
+---
+
+## 9. Updates
+
+After a normal Bazzite update and reboot:
+
+```bash
+cat /var/lib/honor/health-last.txt
+```
+
+If it says `RESULT: OK`, do nothing.
+
+If a new deployment breaks the machine and the system still boots:
+
+```bash
+sudo rpm-ostree rollback
+systemctl reboot
+```
+
+The package transaction, boot staging, reboots, rollback and package removal
+remain explicit user actions by design.
