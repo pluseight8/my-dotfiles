@@ -81,7 +81,7 @@ if [[ -n "$DSC_FILE" ]]; then
     grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
         && ok "DSC force enabled" || bad "DSC force not enabled"
     grep -q 'DSC_Enabled: yes' <<<"$DSC" \
-        && ok "DSC active" || warn "DSC forced but not active yet"
+        && ok "DSC active" || bad "DSC forced but not active"
 else
     bad "i915_dsc_fec_support missing"
 fi
@@ -92,12 +92,12 @@ if [[ -n "$DISPLAY_INFO" ]]; then
     if grep -q 'bpp=30' <<<"$PIPE" && grep -q 'dither=no' <<<"$PIPE"; then
         ok "display: bpp=30, dither=no"
     elif [[ -n "$PIPE" ]]; then
-        warn "display state: $PIPE"
+        bad "display state: $PIPE"
     else
-        warn "display pipe state not found"
+        bad "display pipe state not found"
     fi
 else
-    warn "i915_display_info missing"
+    bad "i915_display_info missing"
 fi
 
 FP_PRESENT=0
