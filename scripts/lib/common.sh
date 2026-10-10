@@ -23,10 +23,10 @@ require_cmds() {
 }
 
 assert_omarchy() {
-    command -v omarchy >/dev/null 2>&1 || die "Omarchy CLI not found"
-    [[ -r /usr/share/omarchy/default/bash/env-bootstrap ]] || die "/usr/share/omarchy is missing; use a supported Omarchy ISO installation"
-    command -v pacman >/dev/null 2>&1 || die "pacman missing; this is not the expected Omarchy/Arch host"
-    command -v limine-mkinitcpio >/dev/null 2>&1 || die "limine-mkinitcpio missing; update Omarchy before continuing"
+    require_cmds omarchy omarchy-version omarchy-brightness-keyboard \
+        omarchy-setup-security-fingerprint brightnessctl pacman limine-mkinitcpio
+    [[ -r /usr/share/omarchy/default/bash/env-bootstrap ]] \
+        || die "/usr/share/omarchy is missing; use a supported Omarchy ISO installation"
 }
 
 read_dmi() {
