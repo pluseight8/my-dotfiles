@@ -37,6 +37,7 @@ check_absent() {
 
 check_absent 'setenforce[[:space:]]+0|SELINUX=disabled|selinux=0' 'no global SELinux disable'
 check_absent 'rpm-ostree[[:space:]]+reset' 'no destructive rpm-ostree reset'
+check_absent 'rpm-ostree[[:space:]]+install' 'installer never layers packages automatically'
 check_absent 'i8042\.dumbkbd' 'no obsolete i8042.dumbkbd'
 check_absent 'patch/(edp-dsc|cdclk-ptl)/install\.sh' 'no custom xe/CDCLK installers'
 check_absent 'curl[^\n]*\|[^\n]*(bash|sh)|wget[^\n]*\|[^\n]*(bash|sh)' 'no curl/wget pipe-to-shell'
