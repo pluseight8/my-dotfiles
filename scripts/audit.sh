@@ -43,6 +43,20 @@ check_absent 'patch/(edp-dsc|cdclk-ptl)/install\.sh' 'no custom xe/CDCLK install
 check_absent 'curl[^\n]*\|[^\n]*(bash|sh)|wget[^\n]*\|[^\n]*(bash|sh)' 'no curl/wget pipe-to-shell'
 check_absent 'sudo[[:space:]]+rm[[:space:]]+-rf[[:space:]]+/' 'no raw sudo rm -rf on absolute paths'
 
+# Explicit reboot/package boundary --------------------------------------------
+if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?systemctl[[:space:]]+reboot([[:space:]]|$)' \
+    $(find "$ROOT" -type f -name '*.sh' ! -name audit.sh -print) >/dev/null 2>&1; then
+    fail "a script automatically reboots the machine"
+else
+    pass "no script automatically reboots the machine"
+fi
+
+if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?rpm-ostree[[:space:]]+' "$ROOT/install.sh" >/dev/null 2>&1; then
+    fail "install.sh executes rpm-ostree"
+else
+    pass "install.sh is rpm-ostree-free"
+fi
+
 # Required hardening -----------------------------------------------------------
 grep -q "HONOR_UPSTREAM_COMMIT='[0-9a-f]\{40\}'" "$ROOT/config/m1230.env" \
     && pass 'HONOR upstream pinned by full commit SHA' \
