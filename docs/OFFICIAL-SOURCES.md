@@ -50,3 +50,11 @@ used as a source for claims about Bazzite behavior.
 
 The installer pins that dependency by commit SHA and applies fail-closed DMI and
 ACPI-byte checks before it can affect the host.
+
+## HID-BPF build headers
+
+The installer does not fetch Linux HID-BPF headers from a public mirror. It
+uses the exact source/header tree shipped with Bazzite's matching OGC
+`kernel-devel` at `/lib/modules/$(uname -r)/build`. This keeps the BPF build
+aligned with the running Bazzite kernel and removes a previously unnecessary
+external header source.
