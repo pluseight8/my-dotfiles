@@ -33,7 +33,7 @@ assert_bazzite() {
 
 read_dmi() {
     local name="$1"
-    cat "/sys/class/dmi/id/$name" 2>/dev/null | tr -d '\r\n' || true
+    tr -d '\r\n' < "/sys/class/dmi/id/$name" 2>/dev/null || true
 }
 
 assert_m1230() {
@@ -68,7 +68,8 @@ assert_selinux_enforcing() {
 }
 
 assert_kernel_build_tree() {
-    local kver="$(uname -r)"
+    local kver
+    kver="$(uname -r)"
     [[ -f "/lib/modules/$kver/build/Makefile" ]] || die "matching kernel-devel tree missing: /lib/modules/$kver/build"
 }
 
