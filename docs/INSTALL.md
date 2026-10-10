@@ -13,40 +13,72 @@ and stops rather than silently installing a partially working setup.
 Make sure there is no pending rpm-ostree deployment. If Bazzite has just updated,
 reboot into the newest deployment first.
 
-## 1. Dependencies — one host transaction
+## 1. BEFORE THE FIRST REBOOT — you run everything manually
 
-Bazzite's documentation recommends minimizing package layering, but these tools
-must run against the host kernel / udev / PAM stack. For this personal machine
-we keep the build tools by default so a future `--repair` or kernel-module
-rebuild does not first require reconstructing the build environment. They do not
-run in the background. If you later want the smallest possible layered set, use
-`scripts/cleanup-dependencies.sh`; it removes only temporary packages that the
-repo can prove it added.
+There is deliberately **no dependency installer script**. The HONOR installer
+does not execute `rpm-ostree install` and does not reboot the dependency
+deployment for you.
 
-If this repository is already cloned, use the ownership-aware helper:
+Run this block yourself. It builds the package list, detects what is actually
+missing on the current Bazzite image, and only then stages those packages:
 
 ```bash
-sudo ./prepare-dependencies.sh
+PKGS=(
+  git
+  udev-hid-bpf
+  fprintd
+  fprintd-pam
+  authselect
+  gcc
+  make
+  mokutil
+  clang
+  bpftool
+  libbpf-devel
+  meson
+  ninja-build
+  pkgconf-pkg-config
+  glib2-devel
+  libgusb-devel
+  nss-devel
+  libgudev-devel
+  gobject-introspection-devel
+  cairo-devel
+  pixman-devel
+  polkit-devel
+  usbutils
+)
+
+MISSING=()
+for pkg in "${PKGS[@]}"; do
+  rpm -q "$pkg" >/dev/null 2>&1 || MISSING+=("$pkg")
+done
+
+printf 'Missing packages: %s\n' "${MISSING[*]:-(none)}"
+
+if ((${#MISSING[@]})); then
+  sudo rpm-ostree install "${MISSING[@]}"
+fi
 ```
 
-It installs missing dependencies and reboots automatically.
+Nothing in this repository runs that transaction for you.
 
-For a brand-new machine where the repo is not cloned yet, the equivalent raw
-host transaction is:
+Now inspect what rpm-ostree staged:
 
 ```bash
-sudo rpm-ostree install \
-  git udev-hid-bpf fprintd fprintd-pam authselect gcc make mokutil \
-  clang bpftool libbpf-devel curl meson ninja-build pkgconf-pkg-config \
-  glib2-devel libgusb-devel nss-devel libgudev-devel \
-  gobject-introspection-devel cairo-devel pixman-devel polkit-devel usbutils \
-&& systemctl reboot
+rpm-ostree status
 ```
 
-The Bazzite image already carries its matching OGC `kernel-devel`; the installer
-verifies `/lib/modules/$(uname -r)/build` and refuses to substitute a random
-Fedora kernel-devel package.
+If the new deployment looks correct, **you reboot manually**:
 
+```bash
+systemctl reboot
+```
+
+Bazzite requires a reboot for layered packages to become part of the active
+deployment. The Bazzite image already carries its matching OGC `kernel-devel`;
+the installer verifies `/lib/modules/$(uname -r)/build/Makefile` and refuses to
+substitute a random Fedora kernel-devel package.
 ## 2. Clone this repository
 
 After the dependency reboot:
@@ -64,7 +96,10 @@ cd /var/opt/pluseight8-my-dotfiles
 sudo ./install.sh --yes
 ```
 
-From this point the installer manages the required reboots itself.
+At startup the installer verifies that all required host packages are already
+present. If anything is missing, it exits with a list; it never installs the
+package for you. From this point it manages only the hardware setup and the
+reboots required to validate it.
 
 ### Stage 1
 
@@ -96,8 +131,8 @@ HID devices exist. Only then it installs:
 - DSC service;
 - boot health-check timer.
 
-It restarts UPower and, when your user bus exists, KDE PowerDevil. Build
-dependencies are deliberately kept for future repairs. Then the machine reboots
+It restarts UPower and, when your user bus exists, KDE PowerDevil. The host
+packages you installed manually are left untouched. Then the machine reboots
 once more.
 
 ### Stage 3
@@ -138,16 +173,19 @@ They are intentionally not kept visually synchronized by periodic EC polling;
 that avoids a permanent wakeup loop just to move a UI slider.
 
 
-## 6. Optional dependency cleanup
+## 6. Package ownership
 
-If you prefer minimal `rpm-ostree` layering after everything has been stable for
-a while:
+Because you explicitly install the rpm-ostree packages yourself, the repository
+does not automatically uninstall them later either. Package layering stays a
+manual user decision in both directions.
+
+Inspect layered packages with:
 
 ```bash
-sudo ./scripts/cleanup-dependencies.sh
+rpm-ostree status
 ```
 
-This removes only build-only packages that `prepare-dependencies.sh` recorded as
-being added by this repo. `git`, `udev-hid-bpf`, fingerprint/PAM support, `gcc`
-and `make` are retained. If you later run a full `--repair`, rerun
-`prepare-dependencies.sh` first if a required build tool is missing.
+If you later want to remove particular build dependencies, do it yourself with
+`rpm-ostree uninstall <package...>` and reboot. Keep `gcc` and `make` if you
+want the keyboard-backlight module to rebuild itself after a future kernel
+change.
