@@ -33,16 +33,24 @@ machine-local state:
 - `/var/opt/honor-magicbook-linux`
 - `/var/opt/pluseight8-my-dotfiles`
 
-## Three-stage installer
+## Explicit reboot boundary
 
-The ACPI override cannot be validated until a reboot, because it is consumed by
-the kernel during boot. HID-BPF installers then need the now-visible touchscreen
-and touchpad. A systemd resume unit turns that unavoidable reboot boundary into
-a single user-initiated installation.
+Boot-affecting work is intentionally separated from runtime installation.
 
-The final reboot is not cosmetic: it proves every service, SELinux label,
-HID-BPF attachment path, DSC write and keyboard module survives a clean boot.
+`preflight.sh` is non-mutating with respect to boot state: it validates the
+hardware/firmware and prepares the pinned source tree only.
 
+The user then manually runs the documented `ostree`, `rpm-ostree initramfs` and
+`rpm-ostree kargs` commands, inspects the staged deployment, and manually
+reboots.
+
+`install.sh` runs only after that reboot. It contains no `rpm-ostree` command
+and no reboot command. It verifies that ACPI and PSR are already active before
+installing runtime/persistent hardware fixes.
+
+A final reboot is optional for functionality but recommended as a manual
+persistence test. The boot health-check timer proves that all fixes come back
+without intervention.
 ## ACPI
 
 The installer does not trust the board name alone. It locates the live SSDT by
@@ -53,7 +61,9 @@ Installation stops on any mismatch.
 
 The micmute and touchpad-edge programs are CO-RE objects. Their installed
 objects live in `/etc/udev-hid-bpf`; they are not rebuilt on every kernel update.
-The touchscreen descriptor fix has a boot re-apply service because descriptor
+Build headers are taken from the matching Bazzite OGC kernel-devel tree at
+`/lib/modules/$(uname -r)/build`, not fetched from a public Linux mirror. The
+touchscreen descriptor fix has a boot re-apply service because descriptor
 reprobe timing matters. The touchpad event hook attaches through udev.
 
 ## Fingerprint
