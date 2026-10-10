@@ -25,15 +25,17 @@ old CachyOS/DriftWM material is preserved in the Git branch
 - forced DSC through the Bazzite OGC kernel's writable debugfs interface;
 - boot health check with a single `RESULT: OK/FAIL` report.
 
-The installation is a three-stage state machine. After the one dependency
-transaction, you start the installer once; it performs the required reboots and
-resumes itself through systemd. Build tools are kept by default for future
-repairability; cleanup is optional.
+The dependency transaction is deliberately manual: the repository never runs
+`rpm-ostree install`. You install the required host packages yourself, inspect
+the staged deployment, and reboot yourself. Only after that do you start the
+three-stage HONOR installer; it performs only the hardware-specific work and its
+required validation reboots.
 
 ## Quick start
 
-Read [`docs/INSTALL.md`](docs/INSTALL.md). The short version, after host build
-dependencies are present, is:
+Read [`docs/INSTALL.md`](docs/INSTALL.md). It contains the exact manual
+`rpm-ostree` dependency commands. After you have run them yourself and rebooted,
+the short version is:
 
 ```bash
 sudo ./install.sh --yes
@@ -49,8 +51,9 @@ The installer refuses to continue when the DMI does not match M1230, Secure
 Boot/lockdown is active, the live ACPI table differs from the audited reference,
 the pinned support source changes, or a required post-reboot check fails.
 
-No `curl | bash`, no global SELinux disable, no `rpm-ostree reset`, no custom
-`xe.ko`, and no blind reuse of EC offsets from other board revisions.
+No `curl | bash`, no global SELinux disable, no `rpm-ostree reset`, no automatic
+`rpm-ostree install`, no custom `xe.ko`, and no blind reuse of EC offsets from
+other board revisions.
 
 See [`docs/AUDIT.md`](docs/AUDIT.md) for the complete audit and
 [`docs/OFFICIAL-SOURCES.md`](docs/OFFICIAL-SOURCES.md) for the official Bazzite
