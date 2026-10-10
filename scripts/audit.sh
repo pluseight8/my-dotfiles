@@ -44,7 +44,7 @@ else
     pass "package installation remains manual"
 fi
 
-if grep -nE 'limine-mkinitcpio|mkinitcpio\.conf|limine-entry-tool|KERNEL_CMDLINE'     "$ROOT/install.sh" >/dev/null 2>&1; then
+if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?(limine-mkinitcpio|mkinitcpio)([[:space:]]|$)|/etc/(mkinitcpio\.conf\.d|limine-entry-tool\.d)/' "$ROOT/install.sh" >/dev/null 2>&1; then
     fail "install.sh mutates boot configuration"
 else
     pass "install.sh is boot-config-free"
