@@ -38,12 +38,13 @@ sudo rpm-ostree rollback
 systemctl reboot
 ```
 
-The installer also attempts to pin the deployment that existed before hardware
-changes so it remains available as an additional recovery point.
+The install guide has you pin the known-good deployment manually before staging
+the ACPI/PSR boot changes, so the recovery point remains an explicit user action.
 
 ## BIOS updates
 
 Treat BIOS updates separately from Bazzite updates. This setup intentionally
 checks exact ACPI bytes because firmware can change tables and EC behavior. Do
 not assume a new BIOS is compatible with the old ACPI override merely because
-the model name is unchanged.
+the model name is unchanged. Follow `docs/BIOS-UPDATE.md`; all boot-affecting
+steps there are manual.
