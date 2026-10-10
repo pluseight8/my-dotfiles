@@ -1,15 +1,20 @@
 # Architecture
 
-## Why this is host-level instead of Homebrew / Distrobox
+## Manual host package boundary
 
-Bazzite recommends Homebrew and containers for ordinary user software. This
-setup is different: it changes initramfs contents, kernel arguments, udev HID-BPF
-loading, PAM/fprintd integration, a kernel module, systemd units and debugfs.
-Those components must interact with the host kernel and host boot sequence, so
-the small number of required packages are layered with rpm-ostree.
+Bazzite recommends Homebrew and containers for ordinary user software and
+package layering only for software that truly has to live on the host. This
+setup changes initramfs contents, kernel arguments, udev HID-BPF loading,
+PAM/fprintd integration, a kernel module, systemd units and debugfs, so a small
+set of host packages is required.
 
-Build-only layering is kept by default on this personal machine for repairability; an ownership-aware cleanup helper is optional.
+The boundary is explicit: **the repository never executes `rpm-ostree install`**.
+The user performs the dependency transaction and its reboot manually before
+launching the HONOR installer. The installer only validates that all required
+packages are present.
 
+That means the user owns package layering; the installer owns only the
+HONOR-specific hardware configuration.
 ## Writable locations
 
 No installed file is written into immutable `/usr` except files already shipped
