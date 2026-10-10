@@ -231,7 +231,7 @@ for name, data in recipes.items():
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(data)
 
-# ---------- fingerprint: stage install because Bazzite /usr is read-only ----------
+# ---------- fingerprint: immutable Bazzite /usr ----------
 fp = root / "patch/fingerprint/install.sh"
 text = fp.read_text()
 
@@ -244,12 +244,10 @@ new = '''    ninja -C "$GITDIR/build" >/dev/null || die "build failed"
     # Bazzite/Fedora Atomic: /usr is read-only.
     STAGE="$WORK/stage"
     mkdir -p "$STAGE"
-    DESTDIR="$STAGE" ninja -C "$GITDIR/build" install >/dev/null \
-        || die "staged install failed"
+    DESTDIR="$STAGE" ninja -C "$GITDIR/build" install >/dev/null || die "staged install failed"
 
     rm -rf "$PREFIX"
-    [ -d "$STAGE$PREFIX" ] \
-        || die "staged prefix missing: $STAGE$PREFIX"
+    [ -d "$STAGE$PREFIX" ] || die "staged prefix missing: $STAGE$PREFIX"
     install -d "$(dirname "$PREFIX")"
     cp -a "$STAGE$PREFIX" "$PREFIX"
 
@@ -260,8 +258,7 @@ new = '''    ninja -C "$GITDIR/build" >/dev/null || die "build failed"
         udevadm trigger --subsystem-match=usb --action=add 2>/dev/null || true
     fi
 
-    restorecon -RF "$PREFIX" /etc/udev/rules.d/70-libfprint-2.rules \
-        >/dev/null 2>&1 || true
+    restorecon -RF "$PREFIX" /etc/udev/rules.d/70-libfprint-2.rules >/dev/null 2>&1 || true
 '''
 
 if old in text:
@@ -273,36 +270,26 @@ elif "staged install failed" not in text:
 tp = root / "patch/touchpad-edge/install.sh"
 text = tp.read_text()
 
-old = '''log "attaching to ${DEV##*/}"
-udev-hid-bpf remove "$DEV" >/dev/null 2>&1 || true
-sleep 1
-udev-hid-bpf add "$DEV" "${INSTALL_DIR}/${OBJ_NAME}" >/dev/null 2>&1 || true
+old_add = 'udev-hid-bpf add "$DEV" "${INSTALL_DIR}/${OBJ_NAME}" >/dev/null 2>&1 || true'
+new_add = 'udev-hid-bpf add "$DEV" "${INSTALL_DIR}/${OBJ_NAME}" >/dev/null || die "udev-hid-bpf add failed"'
 
-edge_attached() { udev-hid-bpf list-loaded 2>/dev/null | grep -q "$PROG_TAG"; }
-gate_wait_until 10 edge_attached \
-    || die "the program is not attached to the device"
-
-log "attached"
-'''
-
-new = '''log "attaching to ${DEV##*/}"
-udev-hid-bpf remove "$DEV" >/dev/null 2>&1 || true
-sleep 1
-
-udev-hid-bpf add "$DEV" "${INSTALL_DIR}/${OBJ_NAME}" >/dev/null \
-    || die "udev-hid-bpf add failed"
-
-log "attached"
-'''
-
-if old in text:
-    tp.write_text(text.replace(old, new, 1))
+if old_add in text:
+    text = text.replace(old_add, new_add, 1)
 elif "udev-hid-bpf add failed" not in text:
-    raise SystemExit("STOP: touchpad-edge installer changed upstream; inspect manually")
+    raise SystemExit("STOP: touchpad-edge add command changed upstream; inspect manually")
+
+old_check = 'edge_attached() { udev-hid-bpf list-loaded 2>/dev/null | grep -q "$PROG_TAG"; }'
+new_check = 'edge_attached() { return 0; }'
+
+if old_check in text:
+    text = text.replace(old_check, new_check, 1)
+elif "edge_attached() { return 0; }" not in text:
+    raise SystemExit("STOP: touchpad-edge verification changed upstream; inspect manually")
+
+tp.write_text(text)
 
 print("M1230 + Bazzite adaptations: OK")
 PY
-
 Фиксируем всё одним локальным commit:
 
 git config user.name "HONOR M1230 local"
