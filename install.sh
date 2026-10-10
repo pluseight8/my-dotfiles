@@ -35,8 +35,6 @@ assert_bazzite
 assert_m1230
 require_cmds git python3 rpm-ostree systemctl md5sum install find awk grep flock
 
-# Make the payload persistent before the first automatic reboot. If the user
-# already runs it from the canonical /var/opt location, do nothing.
 if [[ "$ORIGINAL_ROOT" != "$HONOR_REPO_INSTALL_DIR" ]]; then
     log "copying installer payload to $HONOR_REPO_INSTALL_DIR"
     safe_rm_tree "$HONOR_REPO_INSTALL_DIR"
@@ -46,7 +44,6 @@ if [[ "$ORIGINAL_ROOT" != "$HONOR_REPO_INSTALL_DIR" ]]; then
 fi
 
 REPO_ROOT="$HONOR_REPO_INSTALL_DIR"
-# shellcheck source=/dev/null
 source "$REPO_ROOT/scripts/lib/common.sh"
 
 install -d -m755 "$HONOR_STATE_DIR"
@@ -258,10 +255,6 @@ stage2() {
     systemctl restart upower.service 2>/dev/null || true
     restart_powerdevil_for_user "$TARGET_USER"
 
-    # Keep build dependencies by default. They are inert when unused and make
-    # future --repair runs / kernel-module rebuilds self-contained. Users who
-    # prefer minimal rpm-ostree layering can run cleanup-dependencies.sh later;
-    # that helper removes only temporary packages that this repo itself added.
     log "keeping build dependencies for future repairability (optional cleanup is documented)"
 
     state_set STAGE 3
@@ -279,7 +272,7 @@ stage3() {
     fi
 
     systemctl disable honor-m1230-resume.service >/dev/null 2>&1 || true
-    state_set STAGE done
+    state_set STAGE "done"
     printf 'completed=%s\nkernel=%s\nuser=%s\n' \
         "$(date --iso-8601=seconds)" "$(uname -r)" "$TARGET_USER" \
         > "$HONOR_STATE_DIR/install-complete"
@@ -296,7 +289,7 @@ if (( ! RESUME )); then
         rm -f "$HONOR_STATE_DIR/install-complete"
     fi
     complete="$(state_get STAGE 2>/dev/null || true)"
-    if [[ "$complete" == done ]]; then
+    if [[ "$complete" == "done" ]]; then
         log "installation is already complete; running health check"
         HONOR_USER="$TARGET_USER" /usr/local/lib/honor/health-check.sh
         exit $?
