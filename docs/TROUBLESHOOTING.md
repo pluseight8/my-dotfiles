@@ -12,20 +12,22 @@ Then inspect the installer log:
 sudo less /var/log/honor-m1230-install.log
 ```
 
-## Resume service stopped after an automatic reboot
+## install.sh says the manual boot stage is not active
+
+`install.sh` does not repair boot state and does not call `rpm-ostree`.
+
+Check the current boot:
 
 ```bash
-systemctl status honor-m1230-resume.service --no-pager -l
-sudo journalctl -u honor-m1230-resume.service -b --no-pager -n 200
+sudo journalctl -k -b --no-pager | \
+  grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL|locked down'
+
+cat /sys/module/xe/parameters/enable_psr
 ```
 
-The unit retries failed post-reboot stages three times. Fix the reported cause,
-then restart it:
-
-```bash
-sudo systemctl restart honor-m1230-resume.service
-```
-
+If the ACPI override is not active or PSR is not `1`, go back to the manual
+boot-staging block in `docs/INSTALL.md`, inspect `rpm-ostree status`, and reboot
+yourself.
 ## ACPI override did not load
 
 ```bash
