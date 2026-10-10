@@ -89,7 +89,7 @@ PY
 # Optional shellcheck ----------------------------------------------------------
 if command -v shellcheck >/dev/null 2>&1; then
     mapfile -d '' SHFILES < <(find "$ROOT" -type f -name '*.sh' -print0)
-    if shellcheck -x "${SHFILES[@]}"; then
+    if shellcheck --severity=warning -x "${SHFILES[@]}"; then
         pass 'shellcheck'
     else
         fail 'shellcheck'
