@@ -32,13 +32,15 @@ The new `main` has one purpose: this exact HONOR M1230 on Bazzite.
 
 Bazzite's official documentation says package layering is a last resort and can
 block future updates. This setup layers only tools that must operate on the host
-kernel/udev/PAM stack. The ownership-aware dependency helper records which
-packages it added. Build-only packages are kept by default so future repairs do
-not need to reconstruct the host build environment; an optional cleanup helper
-can remove only the temporary packages this repo owns. Persistent packages are
-limited to runtime components plus `gcc/make` for automatic keyboard-module
-rebuilds.
+kernel/udev/PAM stack, but **the repository never performs that layering**.
 
+The user runs the documented `rpm-ostree install` transaction manually, checks
+`rpm-ostree status`, and reboots manually. `install.sh` only verifies that the
+required RPMs are present. There is no dependency-installer helper and no
+automatic dependency cleanup helper.
+
+This keeps package ownership outside the HONOR hardware installer and makes
+every host package mutation explicit.
 ### Kernel-devel — PASS
 
 The installer does not layer an arbitrary Fedora kernel-devel. The official
@@ -150,7 +152,7 @@ installer snippets have drifted.
 
 - `bash -n` over every shell script;
 - Python bytecode compilation for the adapter;
-- forbidden-pattern scan;
+- forbidden-pattern scan, including an assertion that executable scripts never run `rpm-ostree install`;
 - pin/hash presence checks;
 - systemd DSC context/entrypoint checks;
 - keyboard-module DMI/no-poll checks;
