@@ -1,0 +1,15 @@
+[Unit]
+Description=Resume HONOR M1230 Bazzite installation after reboot
+Wants=network-online.target
+After=network-online.target display-manager.service
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /var/opt/pluseight8-my-dotfiles/install.sh --resume --yes
+Restart=on-failure
+RestartSec=60s
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run HONOR M1230 health check after boot
+
+[Timer]
+OnBootSec=45s
+AccuracySec=5s
+Unit=honor-health-check.service
+
+[Install]
+WantedBy=timers.target
