@@ -83,8 +83,7 @@ fi
 verify_manual_pre_reboot_phase() {
     log "verifying the manual pre-reboot phase"
 
-    [[ -r "$HONOR_STATE_DIR/pre-reboot-staged" ]] || die "pre-reboot stage marker missing; run sudo ./pre-reboot.sh --yes, inspect rpm-ostree status, and reboot manually"
-    [[ -d "$HONOR_UPSTREAM_DIR/.git" ]] || die "prepared HONOR support source missing: $HONOR_UPSTREAM_DIR"
+    [[ -d "$HONOR_UPSTREAM_DIR/.git" ]] || die "prepared HONOR support source missing; run sudo ./preflight.sh --yes and complete the manual boot-staging block first"
     grep -q "^\[board M1230\]$" "$HONOR_UPSTREAM_DIR/devices/zqc-p.conf" || die "M1230 adaptation missing from HONOR support source"
 
     local klog
