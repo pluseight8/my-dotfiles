@@ -265,11 +265,17 @@ stage3() {
     log "stage 3/3: final persistence audit after clean reboot"
     assert_secure_boot_off
     assert_selinux_enforcing
-    sleep 10
+    local attempt healthy=0
+    for attempt in $(seq 1 18); do
+        if HONOR_USER="$TARGET_USER" /usr/local/lib/honor/health-check.sh; then
+            healthy=1
+            break
+        fi
+        warn "final health check attempt $attempt/18 not ready; retrying in 5s"
+        sleep 5
+    done
 
-    if ! HONOR_USER="$TARGET_USER" /usr/local/lib/honor/health-check.sh; then
-        die "final health check failed; see /var/lib/honor/health-last.txt"
-    fi
+    (( healthy )) || die "final health check did not become healthy within 90s; see /var/lib/honor/health-last.txt"
 
     systemctl disable honor-m1230-resume.service >/dev/null 2>&1 || true
     state_set STAGE "done"
