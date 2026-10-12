@@ -1,186 +1,85 @@
-# Repository and installer audit
+# Audit notes
 
-Audit target: the Bazzite/HONOR repository after the 2026-10-10 overhaul.
+## Scope
 
-## Result
+The current repository targets **Omarchy on HONOR ZQC-P/M1230** only. The
+previous Bazzite integration was replaced rather than mixed into the same
+installer path.
 
-**Static repository audit: PASS (GitHub Actions)**, subject to the residual hardware/update risks
-listed below.
+## Fail-closed gates
 
-Run it locally at any time:
+Before boot changes are staged:
 
-```bash
-bash scripts/audit.sh
+- Omarchy package and tools must exist;
+- the running kernel pkgbase must begin with `linux-omarchy`;
+- DMI must match `HONOR / ZQC-P / M1230 / ZQC-P-PCB`;
+- kernel lockdown/Secure Boot must not be active;
+- matching kernel headers must exist;
+- required host packages must already be installed;
+- `/sys/kernel/btf/vmlinux` must exist;
+- the pinned HONOR git commit must resolve to the pinned tree SHA;
+- live `I2C_DEVT` must equal the audited stock or exact patched bytes.
+
+Unknown firmware is not given a force flag.
+
+## Upstream trust boundary
+
+The local M1230 profile is `probed`, not `verified`, and only lists upstream
+Tier-A fixes. That prevents the generic HONOR code from silently inheriting
+M1010/M1050 board constants.
+
+The locally written keyboard-backlight module is separately guarded by exact
+DMI plus ACPI symbol checks.
+
+## Boot configuration
+
+No repository script rewrites `/etc/default/limine`.
+
+The two persistent boot inputs are:
+
+```text
+/etc/mkinitcpio.conf.d/90-honor-m1230-acpi.conf
+/etc/limine-entry-tool.d/90-honor-m1230.conf
 ```
 
-A GitHub Actions workflow runs the same self-contained audit on every push and
-pull request.
+`stage-boot.sh` calls `limine-mkinitcpio`, but never reboots.
 
-## Scope cleanup
+## Display driver policy
 
-The old repository mixed CachyOS/DriftWM dotfiles, scratch files, office data
-and several obsolete installation transcripts. The Bazzite overhaul removes
-those from `main`. They remain recoverable in:
+No local `xe.ko` is installed.
 
-`backup/pre-bazzite-honor-overhaul-2026-10-10`
+The PTL CDCLK bug fix is already present in the reviewed stable 7.2.8 base.
+The 10-bpc/DSC issue is handled through the packaged kernel's debugfs force
+control and validated after it is written.
 
-The new `main` has one purpose: this exact HONOR M1230 on Bazzite.
+This avoids combining a vanilla-built Xe module with Omarchy's patched kernel.
 
-## Bazzite integration audit
+## Package ownership
 
-### Package management — PASS
+The repository does not invoke `pacman -S`. Host packages are installed by the
+user before preflight.
 
-Bazzite's official documentation says package layering is a last resort and can
-block future updates. This setup layers only tools that must operate on the host
-kernel/udev/PAM stack, but **the repository never performs that layering**.
+The EgisTec SDCP path builds into a private `/opt` prefix rather than replacing
+Omarchy's package database entry. Omarchy remains responsible for its own
+fingerprint PAM/polkit/lock policy.
 
-The user runs the documented `rpm-ostree install` transaction manually, checks
-`rpm-ostree status`, and reboots manually. `install.sh` only verifies that the
-required RPMs are present. There is no dependency-installer helper and no
-automatic dependency cleanup helper.
+## Reboot policy
 
-This keeps package ownership outside the HONOR hardware installer and makes
-every host package mutation explicit.
-### Kernel-devel — PASS
+No script contains an automatic `systemctl reboot`, `reboot`, `shutdown -r` or
+equivalent. The user crosses the reboot boundary explicitly after inspecting
+the staged boot configuration.
 
-The installer does not layer an arbitrary Fedora kernel-devel. The official
-Bazzite build installs and version-locks its kernel and matching kernel-devel.
-The setup only proceeds when the running `/lib/modules/<release>/build/Makefile`
-exists.
+## Static CI
 
-### Initramfs — NECESSARY EXCEPTION
+`.github/workflows/audit.yml` runs `scripts/audit.sh`. The audit checks syntax
+and repository invariants, including:
 
-Bazzite documentation warns that local initramfs customization slows image
-updates and recommends kernel arguments where possible. PSR therefore uses
-`rpm-ostree kargs`; only the ACPI table uses local initramfs because an ACPI
-override cannot be expressed as a kernel argument.
-
-### Update/rollback model — PASS
-
-The installer pins the pre-change deployment when possible. Bazzite's normal
-rollback mechanism remains intact; no `rpm-ostree reset` is used.
-
-## Hardware safety audit
-
-### DMI gate — PASS
-
-Every destructive host path is gated to `HONOR / ZQC-P / M1230`. The keyboard
-module has an independent in-kernel DMI table and the HONOR upstream adapter adds
-an M1230-specific device profile.
-
-### ACPI gate — PASS
-
-The installer does not trust DMI alone. It:
-
-1. finds the live SSDT by OEM id `I2C_DEVT`;
-2. verifies the pinned stock file's known MD5;
-3. verifies the pinned patched file's known MD5;
-4. compares the live firmware table to the stock reference;
-5. stops on any mismatch.
-
-No `FORCE_ACPI=1` escape is used.
-
-### BIOS update behavior — PASS WITH PROCEDURE
-
-A firmware update can invalidate the ACPI assumption before Linux has a chance
-to run the normal health check. BIOS preparation is documented as explicit
-manual commands in `docs/BIOS-UPDATE.md`; there is no script that silently
-changes the next boot. After the BIOS update, `preflight.sh` must revalidate the
-new live ACPI bytes before the user manually restages the override.
-
-### HID-BPF — PASS
-
-Installed objects are tied to the observed touchscreen/touchpad IDs. The
-obsolete `udev-hid-bpf list-loaded` verification is removed from the pinned
-upstream adapter because current Bazzite/Fedora tooling does not expose it.
-
-### Fingerprint — PASS WITH EXTERNAL CODE RISK
-
-The Bazzite immutable `/usr` failure is fixed by staging Meson installation with
-`DESTDIR`, then copying only the private `/opt` prefix and generated udev rule to
-writable persistent paths. The SDCP source is already pinned by the hardware
-support recipe.
-
-Residual risk: the SDCP implementation is not part of a released system
-libfprint. A future fprintd/libfprint ABI change can require rebuilding or
-rebasing the private library. The health check detects disappearance from the
-loader cache but cannot prove every future ABI behavior in advance.
-
-### Keyboard backlight — PASS
-
-The driver is DMI-bound, checks expected DSDT symbols, does not modify brightness
-on module load, and carries no periodic EC polling. The build service applies
-SELinux `modules_object_t` before `insmod` and rebuilds on kernel-release change.
-
-### DSC — PASS WITH ISOLATED PRIVILEGE
-
-No custom `xe.ko` is installed. The current OGC kernel's debugfs switch is used.
-The tested SELinux policy blocks `init_t` from writing `debugfs_t`; the service
-therefore runs only this root-owned oneshot in Fedora's existing
-`unconfined_service_t`. SELinux remains globally Enforcing.
-
-Security trade-off: that one process is unconfined while it runs. The helper is
-root-owned, short-lived, has no network access, accepts no input, writes only the
-located eDP DSC control, and exits immediately.
-
-## Script audit
-
-### Error handling — PASS
-
-Mutation scripts use `set -euo pipefail`, explicit gates, a single-install lock,
-root checks and fail-closed validation. Network-dependent hardware builds retry
-three times before stopping.
-
-### Reboot boundary — PASS
-
-No executable script performs `systemctl reboot` and `install.sh` contains no
-`rpm-ostree` command at all.
-
-The dependency deployment is staged manually by the user. The ACPI/initramfs
-and PSR deployment is also staged manually after a non-mutating preflight. The
-user inspects `rpm-ostree status` before each reboot.
-
-`install.sh` is post-reboot/runtime-only. The final clean reboot is an explicit
-user action used only to prove persistence through the health-check timer.
-### Destructive path handling — PASS
-
-There is no global `rpm-ostree reset`, no global SELinux disable and no raw
-absolute `sudo rm -rf`. Managed tree deletion goes through a path guard limited
-to dedicated `/var/opt` or installer-state paths.
-
-### Source pinning — PASS
-
-The HONOR support source is pinned to a full commit SHA. The adaptation script
-also refuses to operate when HEAD differs from the audited commit or when exact
-installer snippets have drifted.
-
-## Static checks performed
-
-- `bash -n` over every shell script;
-- Python bytecode compilation for the adapter;
-- forbidden-pattern scan, including assertions that scripts never run `rpm-ostree install`, no script auto-reboots, and `install.sh` contains no `rpm-ostree` command;
-- pin/hash presence checks;
-- systemd DSC context/entrypoint checks;
-- keyboard-module DMI/no-poll checks;
-- official-source document host allowlist;
-- optional ShellCheck when installed;
-- `git diff --check` in a real checkout.
-
-## Residual risks that cannot be scripted away
-
-1. A future Bazzite kernel can change an internal API used by the tiny keyboard
-   module. Rebuild will then fail rather than load an incompatible module.
-2. A future OGC kernel can remove or rename `i915_dsc_fec_support`. The DSC
-   service and health check will fail visibly rather than patching a module.
-3. A future libfprint/fprintd change can invalidate the private SDCP build.
-4. A BIOS update can change ACPI/EC. Use the BIOS-update procedure first.
-5. Hardware vendors can silently change components under the same retail model.
-   The device IDs and ACPI-byte checks are there specifically to stop on that
-   case.
-
-## CI supply-chain note
-
-The GitHub Actions checkout action is pinned to an exact commit SHA rather than
-a mutable version tag. The audit job has passed on the rebuilt Bazzite-only
-`main` branch, including Bash parsing, Python compilation, warning/error-level
-ShellCheck, policy scans and whitespace checks.
+- no Bazzite/rpm-ostree integration in executable scripts;
+- no package installation inside the three main installer phases;
+- no direct `/etc/default/limine` write;
+- no custom Xe-module installer path;
+- no automatic reboot;
+- full upstream SHA pin;
+- exact ACPI hashes;
+- M1230 DMI guard in the keyboard module;
+- Omarchy Limine/mkinitcpio drop-in usage.

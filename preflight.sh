@@ -13,8 +13,10 @@ for arg in "$@"; do
             cat <<'HELP'
 Usage: sudo ./preflight.sh [--yes]
 
-Validates the exact HONOR ZQC-P/M1230 and prepares the pinned support source.
-It DOES NOT modify initramfs, kernel arguments, rpm-ostree deployments, or reboot.
+Read-only validation of the Omarchy host and exact HONOR ZQC-P/M1230 hardware.
+It also prepares the pinned upstream HONOR source under /var/opt.
+
+It does NOT change Limine, mkinitcpio, the running kernel or reboot the machine.
 HELP
             exit 0
             ;;
@@ -23,21 +25,25 @@ HELP
 done
 
 require_root
-assert_bazzite
+assert_omarchy
 assert_m1230
+assert_omarchy_kernel
+assert_lockdown_off
 assert_host_dependencies_present
-assert_secure_boot_off
-assert_selinux_enforcing
-assert_kernel_build_tree
-assert_no_pending_deployment
-require_cmds git python3 md5sum install dd tr awk
+assert_matching_headers
+assert_hid_bpf_kernel_support
+require_cmds git python3 md5sum dd od awk grep find journalctl
 
 if (( ! YES )); then
     cat <<'CONFIRM'
-This performs read-only hardware/firmware validation and prepares the pinned
-HONOR support source under /var/opt.
+This will:
+- verify the exact HONOR ZQC-P/M1230 identity;
+- verify current Omarchy/kernel prerequisites;
+- verify the live ACPI table against the audited reference;
+- clone the HONOR support repository at one pinned commit;
+- add only the M1230 Tier-A profile/recipes locally.
 
-It will NOT run rpm-ostree and will NOT reboot.
+It will NOT modify the boot configuration and will NOT reboot.
 Type CHECK to continue:
 CONFIRM
     read -r answer
@@ -58,49 +64,38 @@ prepare_upstream() {
         git -C "$dir" clean -fdx
     else
         install -d -m755 "$(dirname "$dir")"
-        retry 3 10 git clone --no-checkout "$HONOR_UPSTREAM_URL" "$dir" || die "HONOR source clone failed"
+        retry 3 10 git clone --no-checkout "$HONOR_UPSTREAM_URL" "$dir" \
+            || die "HONOR source clone failed"
     fi
 
-    retry 3 10 git -C "$dir" fetch --prune origin || die "HONOR source fetch failed"
+    retry 3 10 git -C "$dir" fetch --prune origin \
+        || die "HONOR source fetch failed"
     git -C "$dir" checkout --detach "$HONOR_UPSTREAM_COMMIT"
-    [[ "$(git -C "$dir" rev-parse 'HEAD^{tree}')" == "$HONOR_UPSTREAM_TREE" ]] || die "pinned HONOR source tree hash mismatch"
+
+    [[ "$(git -C "$dir" rev-parse 'HEAD^{tree}')" == "$HONOR_UPSTREAM_TREE" ]] \
+        || die "pinned HONOR source tree hash mismatch"
+
     python3 "$ROOT/scripts/prepare-honor-upstream.py" "$dir"
 }
 
-find_live_i2c_devt() {
-    local f oem
-    for f in /sys/firmware/acpi/tables/SSDT*; do
-        [[ -e "$f" ]] || continue
-        oem="$(dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\0 ' || true)"
-        if [[ "$oem" == "I2C_DEVT" ]]; then
-            printf '%s\n' "$f"
-            return 0
-        fi
-    done
-    return 1
-}
-
+log "Omarchy: $(omarchy-version)"
+log "kernel: $(uname -r) ($(running_kernel_pkgbase))"
 log "preparing pinned HONOR support source"
 prepare_upstream
 
-live="$(find_live_i2c_devt)" || die "live I2C_DEVT ACPI table not found"
-stock="$HONOR_UPSTREAM_DIR/dump/acpi/zqc-p/SSDT27_orig.aml"
-patched="$HONOR_UPSTREAM_DIR/patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml"
-[[ -f "$stock" && -f "$patched" ]] || die "pinned ACPI reference files missing"
+acpi_state="$(assert_acpi_known)"
+log "ACPI I2C_DEVT: $acpi_state ($(current_i2c_hash))"
 
-live_md5="$(md5sum "$live" | awk '{print $1}')"
-stock_md5="$(md5sum "$stock" | awk '{print $1}')"
-patched_md5="$(md5sum "$patched" | awk '{print $1}')"
-
-[[ "$stock_md5" == "$HONOR_ACPI_STOCK_MD5" ]] || die "pinned stock ACPI hash changed: $stock_md5"
-[[ "$patched_md5" == "$HONOR_ACPI_PATCHED_MD5" ]] || die "pinned patched ACPI hash changed: $patched_md5"
-[[ "$live_md5" == "$stock_md5" ]] || die "live I2C_DEVT differs from audited reference: $live_md5"
+KLOG="$(journalctl -k -b --no-pager 2>/dev/null || true)"
+if grep -q 'CPU pipe .* FIFO underrun' <<<"$KLOG"; then
+    warn "the current boot logged a display FIFO underrun"
+else
+    log "no display FIFO underrun found in the current boot log"
+fi
 
 echo
 log "PREFLIGHT: OK"
-echo "Live I2C_DEVT:  $live_md5"
-echo "Stock reference: $stock_md5"
-echo "Patched table:   $patched_md5"
-echo
 echo "No boot configuration was changed."
-echo "Now follow the MANUAL boot-staging block in docs/INSTALL.md."
+echo
+echo "Next:"
+echo "  sudo ./stage-boot.sh"

@@ -1,60 +1,75 @@
-# Official sources used for the Bazzite integration
+# Sources reviewed for the Omarchy adaptation
 
-The Bazzite design and audit intentionally used official project sources only.
-No blogs, forum posts, Reddit threads, package-guide sites or generated how-to
-pages were used to decide how Bazzite itself should be modified.
+Reviewed on 2026-10-12.
 
-Reviewed on 2026-10-10:
+## Omarchy
 
-## Bazzite documentation
+Primary source:
 
-- https://docs.bazzite.gg/
-- https://docs.bazzite.gg/Installing_and_Managing_Software/rpm-ostree/
-- https://docs.bazzite.gg/Installing_and_Managing_Software/Homebrew/
-- https://docs.bazzite.gg/Installing_and_Managing_Software/Updates_Rollbacks_and_Rebasing/
-- https://docs.bazzite.gg/General/Installation_Guide/install-guide/
-- https://docs.bazzite.gg/Advanced/dracut-and-initramfs/
+- https://github.com/omacom/omarchy
+- reviewed revision:
+  `4c1b4cb3a94447aff39af98e2fcc0490a9fb32e7`
 
-Documentation repository revision reviewed:
+Relevant interfaces verified there:
 
-`ublue-os/docs.bazzite.gg` @ `adb77da474d8da9f5bdd6b3fc6de4b7243cb9291`
+- `/etc/limine-entry-tool.d/*.conf` with
+  `KERNEL_CMDLINE[default]+=" ..."` for hardware kernel parameters;
+- `/etc/mkinitcpio.conf.d/*.conf` with `HOOKS+=(...)`;
+- `limine-mkinitcpio` as Omarchy's boot-image rebuild path;
+- `linux-omarchy` and `linux-omarchy-headers` in the installed package set;
+- `omarchy-setup-security-fingerprint` as the owner of Omarchy PAM/polkit/lock
+  integration.
 
-## Bazzite source repository
+## Omarchy package repository
 
-- https://github.com/ublue-os/bazzite
-- `build_files/install-kernel-akmods` — confirms Bazzite's image carries its
-  matching kernel-devel and version-locks the kernel/kernel-devel set.
-- `Containerfile` — confirms Bazzite enables its update/rollback health services
-  and SELinux-oriented image configuration.
-- Bazzite `ujust` source — confirms Bazzite itself uses `rpm-ostree kargs` for
-  persistent kernel-argument changes.
+Primary source:
 
-Repository revision reviewed:
+- https://github.com/omacom/omarchy-pkgs
+- reviewed revision:
+  `4192ecffd0c5500fd67e1a2db15dafa945655a03`
 
-`ublue-os/bazzite` @ `7f903b94e31461c92b93110a2cb3a33f9539942a`
+The reviewed `linux-omarchy` meta package points at `linux-omarchy-bore`; the
+reviewed kernel package is based on Linux `7.2.8`.
 
-## Fedora SELinux policy source
+## Arch mkinitcpio
 
-The DSC service uses Fedora's existing `unconfined_service_t` domain rather than
-disabling SELinux or adding a broad `init_t -> debugfs_t` allow rule. The domain
-was verified in the official Fedora SELinux policy source:
+Primary source:
 
-- https://github.com/fedora-selinux/selinux-policy/blob/rawhide/policy/modules/system/unconfined.te
+- https://github.com/archlinux/mkinitcpio
 
-## HONOR-specific code dependency
+Current upstream includes the `acpi_override` install hook. That hook calls
+`add_file_early()` for AML files under `/etc/initcpio/acpi_override`, placing
+them in the early uncompressed CPIO required by Linux ACPI table override.
 
-Bazzite does not provide model-specific support for this laptop. The HONOR
-hardware patch implementation is therefore a separate, pinned code dependency
-that had already been validated on this exact M1230 during bring-up. It is not
-used as a source for claims about Bazzite behavior.
+## HONOR hardware research / implementation
 
-The installer pins that dependency by commit SHA and applies fail-closed DMI and
-ACPI-byte checks before it can affect the host.
+Primary project used by this repository:
 
-## HID-BPF build headers
+- https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010
+- pinned commit:
+  `95631852eeda83b8a32a4913f5431475daad3ca1`
+- pinned Git tree:
+  `22f982f1a762dc076c00e287ef69e265cc8a69da`
 
-The installer does not fetch Linux HID-BPF headers from a public mirror. It
-uses the exact source/header tree shipped with Bazzite's matching OGC
-`kernel-devel` at `/lib/modules/$(uname -r)/build`. This keeps the BPF build
-aligned with the running Bazzite kernel and removes a previously unnecessary
-external header source.
+This source provides the audited ZQC-P ACPI table, HID-BPF implementations and
+the EgisTec SDCP libfprint recipe. M1230 is added locally at `status=probed`;
+the upstream M1010/M1050 `verified` status is never copied to it.
+
+## Linux stable source
+
+Primary stable tree:
+
+- https://github.com/gregkh/linux
+- checked at tag `v7.2.8`
+
+`drivers/gpu/drm/i915/display/intel_cdclk.c` at that tag already contains the
+Panther Lake guard around the CD2X pipe-field sanitization
+(`DISPLAY_VER(display) < 30`). This is why the Omarchy adaptation does not
+install the older local `cdclk-ptl` `xe.ko` patch.
+
+## Design rule
+
+Claims about Omarchy behavior are based on Omarchy/Omarchy-pkgs sources.
+HONOR-specific behavior is based on the pinned hardware project plus the exact
+M1230 observations encoded in this repository. The two are not treated as
+interchangeable sources.

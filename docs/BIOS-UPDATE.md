@@ -1,48 +1,60 @@
 # BIOS updates
 
-A BIOS update is treated as a firmware change, not a normal Bazzite update.
-The exact `I2C_DEVT` ACPI bytes can change even when the retail model name
-stays the same.
-
-This repository deliberately has **no script** that silently stages a reboot
-for a BIOS update. You perform every boot-affecting command yourself.
+A BIOS update can change ACPI tables even when the retail model name stays the
+same. The M1230 setup therefore treats BIOS changes separately from ordinary
+Omarchy updates.
 
 ## Before flashing BIOS
 
-Remove only the HONOR ACPI override files:
+Remove the ACPI override from the next boot:
 
 ```bash
-sudo rm -f /etc/honor-magicbook/acpi/SSDT27_TPD0.aml
-sudo rm -f /etc/dracut.conf.d/90-honor-acpi.conf
+sudo rm -f /etc/initcpio/acpi_override/SSDT27_TPD0.aml
+sudo rm -f /etc/mkinitcpio.conf.d/90-honor-m1230-acpi.conf
+sudo limine-mkinitcpio
 ```
 
-Regenerate/stage the local initramfs deployment yourself:
-
-```bash
-sudo rpm-ostree initramfs --enable
-rpm-ostree status
-```
-
-Inspect the staged deployment. If it is correct, reboot yourself:
+Reboot yourself:
 
 ```bash
 systemctl reboot
 ```
 
-Only then flash/update BIOS.
+Confirm the old override is no longer loaded:
+
+```bash
+sudo journalctl -k -b --no-pager | grep -i 'Table Upgrade'
+```
+
+Only then flash/update the BIOS.
+
+The PSR Limine drop-in does not need to be removed merely to flash firmware; it
+is a kernel parameter, not firmware data.
 
 ## After the BIOS update
 
-Do **not** copy the old ACPI override back blindly.
+Do **not** restore the old AML blindly.
 
-Run the non-mutating preflight:
+Update the local checkout if desired, then run the read-only preflight:
 
 ```bash
 cd /var/opt/pluseight8-my-dotfiles
 sudo ./preflight.sh --yes
 ```
 
-If preflight still reports exact ACPI reference matches, repeat the manual
-boot-staging block from `docs/INSTALL.md`, inspect `rpm-ostree status`, and
-reboot yourself. If the bytes changed, stop and re-audit the new firmware
-before restoring any ACPI override.
+If the new live `I2C_DEVT` bytes still match the audited stock reference,
+`preflight.sh` will say `PREFLIGHT: OK`. Then stage the override again:
+
+```bash
+sudo ./stage-boot.sh
+systemctl reboot
+```
+
+After the reboot:
+
+```bash
+sudo ./install.sh --yes
+```
+
+If the ACPI hash changed, stop. The new firmware needs a fresh audit before the
+old corrected table is trusted again.

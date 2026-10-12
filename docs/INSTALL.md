@@ -1,319 +1,281 @@
-# Installation
+# Installation on Omarchy
 
-This guide is for a fresh/current **Bazzite KDE** installation on
-**HONOR ZQC-P / M1230** only.
+This guide is for the exact **HONOR MagicBook Pro 14 2026 AI, ZQC-P / M1230**.
 
-The rule is simple:
+The setup is split into three explicit phases. None of the scripts reboots the
+machine for you.
 
-> **Every command that changes the next boot is run explicitly by you.**
+## 1. Update Omarchy first
 
-No repository script installs RPM packages. No repository script reboots the
-machine. `install.sh` is strictly post-reboot/runtime setup.
-
----
-
-## 0. Before starting
-
-Keep Secure Boot disabled for this tested setup. Bazzite itself supports Secure
-Boot, but this machine setup uses a local ACPI override and a local out-of-tree
-keyboard-backlight module. The checks fail closed when kernel lockdown is
-active.
-
-If Bazzite has just updated and `rpm-ostree status` shows a staged deployment,
-reboot into that deployment before starting.
-
-Check:
+From your normal session:
 
 ```bash
-rpm-ostree status
+omarchy-update
 ```
 
----
-
-## 1. Manually install host dependencies
-
-Run this yourself. It calculates what is missing and stages only those RPMs:
-
-```bash
-PKGS=(
-  git
-  udev-hid-bpf
-  fprintd
-  fprintd-pam
-  authselect
-  gcc
-  make
-  mokutil
-  clang
-  bpftool
-  libbpf-devel
-  meson
-  ninja-build
-  pkgconf-pkg-config
-  glib2-devel
-  libgusb-devel
-  nss-devel
-  libgudev-devel
-  gobject-introspection-devel
-  cairo-devel
-  pixman-devel
-  polkit-devel
-  usbutils
-)
-
-MISSING=()
-for pkg in "${PKGS[@]}"; do
-  rpm -q "$pkg" >/dev/null 2>&1 || MISSING+=("$pkg")
-done
-
-printf 'Missing packages: %s\n' "${MISSING[*]:-(none)}"
-
-if ((${#MISSING[@]})); then
-  sudo rpm-ostree install "${MISSING[@]}"
-fi
-```
-
-The repository never runs this transaction for you.
-
-Inspect the staged deployment:
-
-```bash
-rpm-ostree status
-```
-
-If it looks correct, **you reboot manually**:
+If the update installed a new kernel, reboot and log back in before continuing:
 
 ```bash
 systemctl reboot
 ```
 
----
+Confirm that the running kernel is an Omarchy kernel and that matching headers
+can be installed for it:
 
-## 2. Clone the Bazzite/HONOR repository
+```bash
+uname -r
+cat /usr/lib/modules/"$(uname -r)"/pkgbase
+```
 
-After the dependency reboot:
+The pkgbase must start with `linux-omarchy`.
+
+## 2. Keep Secure Boot / kernel lockdown off
+
+This adaptation uses an early ACPI table override and one local out-of-tree
+keyboard-backlight module. The installer therefore refuses to continue while
+kernel lockdown is active.
+
+Check:
+
+```bash
+cat /sys/kernel/security/lockdown 2>/dev/null || true
+```
+
+If the file exists, the selected state must be `[none]`.
+
+## 3. Install host dependencies manually
+
+The repository does **not** install packages on your behalf.
+
+Resolve the running kernel package base:
+
+```bash
+KERNEL_PKGBASE="$(cat /usr/lib/modules/"$(uname -r)"/pkgbase)"
+echo "$KERNEL_PKGBASE"
+```
+
+Then install the dependencies:
+
+```bash
+sudo pacman -S --needed \
+  git \
+  base-devel \
+  clang \
+  bpf \
+  udev-hid-bpf \
+  curl \
+  usbutils \
+  fprintd \
+  meson \
+  ninja \
+  pkgconf \
+  glib2 \
+  libgusb \
+  nss \
+  libgudev \
+  gobject-introspection \
+  cairo \
+  pixman \
+  polkit \
+  "${KERNEL_PKGBASE}-headers"
+```
+
+If that transaction updates the kernel, reboot once and repeat the pkgbase /
+header check before continuing.
+
+## 4. Clone the Omarchy adaptation
+
+Recommended persistent checkout:
 
 ```bash
 sudo git clone https://github.com/pluseight8/my-dotfiles.git \
   /var/opt/pluseight8-my-dotfiles
 
 sudo chown -R "$USER:$(id -gn)" /var/opt/pluseight8-my-dotfiles
-
 cd /var/opt/pluseight8-my-dotfiles
 ```
 
-If that directory already exists from a previous attempt, do not overwrite it
-blindly. Inspect it first.
-
----
-
-## 3. Run the non-mutating hardware preflight
+Run the repository audit before touching the machine:
 
 ```bash
-sudo ./preflight.sh --yes
+./scripts/audit.sh
 ```
 
-`preflight.sh` does **not** run `rpm-ostree`, does **not** modify initramfs,
-does **not** change kernel arguments, and does **not** reboot.
+The final line must be:
 
-It only:
+```text
+AUDIT RESULT: OK
+```
 
-- verifies Bazzite;
-- verifies DMI is exactly HONOR / ZQC-P / M1230;
-- verifies Secure Boot/lockdown state;
-- verifies SELinux Enforcing;
-- verifies every required host RPM is already installed;
-- verifies the matching Bazzite OGC kernel build tree exists;
-- clones the HONOR support source at the exact audited commit;
-- applies the M1230/Bazzite source adaptations;
-- finds the live `I2C_DEVT` ACPI table;
-- compares the live table byte-for-byte with the audited stock reference;
-- verifies the stock and patched ACPI MD5 values.
+## 5. Preflight
 
-Expected end:
+Run:
+
+```bash
+sudo ./preflight.sh
+```
+
+Read the summary and type `CHECK`.
+
+The preflight:
+
+- verifies exact DMI identity for ZQC-P / M1230;
+- verifies the running Omarchy kernel and matching headers;
+- refuses Secure-Boot / lockdown states incompatible with this setup;
+- checks the live `I2C_DEVT` table against the audited hashes;
+- clones the HONOR hardware repository at the pinned commit;
+- adds a local **probed** M1230 profile containing only the audited Tier-A fixes.
+
+It does **not** modify the boot configuration.
+
+Expected ending:
 
 ```text
 PREFLIGHT: OK
 ```
 
-If preflight does not say `OK`, stop. Do not stage the boot changes.
+## 6. Stage the boot fixes
 
----
-
-## 4. Manually stage the reboot-required HONOR boot changes
-
-These commands are deliberately **not hidden in a script**.
-
-First pin the currently working deployment:
+Run:
 
 ```bash
-sudo ostree admin pin 0
+sudo ./stage-boot.sh
 ```
 
-Install the already-validated ACPI override into persistent `/etc`:
+This installs the audited ACPI AML into:
+
+```text
+/etc/initcpio/acpi_override/SSDT27_TPD0.aml
+```
+
+and adds the official mkinitcpio `acpi_override` hook via:
+
+```text
+/etc/mkinitcpio.conf.d/90-honor-m1230-acpi.conf
+```
+
+It also adds:
+
+```text
+xe.enable_psr=1
+```
+
+through Omarchy's Limine drop-in interface:
+
+```text
+/etc/limine-entry-tool.d/90-honor-m1230.conf
+```
+
+Finally it rebuilds the boot entries with:
 
 ```bash
-sudo install -d -m755 /etc/honor-magicbook/acpi
-
-sudo install -m644 \
-  /var/opt/honor-magicbook-linux/patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml \
-  /etc/honor-magicbook/acpi/SSDT27_TPD0.aml
-
-sudo install -d -m755 /etc/dracut.conf.d
-
-sudo tee /etc/dracut.conf.d/90-honor-acpi.conf >/dev/null <<'EOF'
-acpi_override="yes"
-acpi_table_dir="/etc/honor-magicbook/acpi"
-EOF
+limine-mkinitcpio
 ```
 
-Now explicitly enable the local initramfs deployment:
+Expected ending:
 
-```bash
-sudo rpm-ostree initramfs --enable
+```text
+BOOT STAGE: OK
 ```
 
-Normalize PSR so the next boot has exactly `xe.enable_psr=1`:
+The script deliberately does not reboot.
 
-```bash
-for arg in $(rpm-ostree kargs); do
-  case "$arg" in
-    xe.enable_psr=*)
-      if [ "$arg" != "xe.enable_psr=1" ]; then
-        sudo rpm-ostree kargs --delete-if-present="$arg"
-      fi
-      ;;
-  esac
-done
-
-sudo rpm-ostree kargs --append-if-missing="xe.enable_psr=1"
-```
-
-Inspect everything before rebooting:
-
-```bash
-rpm-ostree kargs
-rpm-ostree status
-```
-
-Only if it looks correct, **you reboot manually**:
+## 7. Reboot yourself
 
 ```bash
 systemctl reboot
 ```
 
----
-
-## 5. Post-reboot runtime installation
-
-After login:
+After logging back in:
 
 ```bash
 cd /var/opt/pluseight8-my-dotfiles
-sudo ./install.sh --yes
 ```
 
-This is now a strict rule in the repository:
+## 8. Install runtime fixes
 
-- `install.sh` contains no `rpm-ostree` command;
-- `install.sh` contains no reboot command;
-- it refuses to continue if the manually staged ACPI/PSR state is not active.
+Run:
 
-It verifies:
+```bash
+sudo ./install.sh
+```
 
-- ACPI `Table Upgrade` is active;
-- no relevant `AE_AML_INTERNAL` returned;
-- touchscreen `2808:5662` exists;
-- touchpad `27c6:0f9a` exists;
-- `xe.enable_psr=1` is active.
+Read the summary and type `INSTALL`.
 
-Then it installs only runtime/persistent hardware fixes:
+Before installing anything, the script proves that the rebooted system is
+actually using the corrected ACPI table and `xe.enable_psr=1`.
 
-- micmute HID-BPF;
-- touchpad-edge HID-BPF;
-- EgisTec SDCP fingerprint support;
-- M1230 keyboard-backlight module/service;
-- DSC service;
+It then installs:
+
+- touchscreen mic-mute HID-BPF fix;
+- touchpad left-edge brightness HID-BPF fix;
+- EgisTec `1c7a:05aa` SDCP libfprint support;
+- M1230 keyboard-backlight LED module/service;
+- DSC force service for the internal OLED;
 - boot health-check timer.
 
-It finishes by running the current-boot health check. Expected:
+It does **not** install a replacement `xe.ko`.
+
+Expected ending:
 
 ```text
 RUNTIME INSTALL: OK
-RESULT: OK
 ```
 
-At this point the fixes are active **without another forced reboot**.
+## 9. Let Omarchy configure fingerprint authentication
 
----
-
-## 6. Fingerprint enrollment
-
-The driver is installed automatically, but your finger obviously must be
-enrolled interactively as your normal user:
+Return to your normal user shell and run:
 
 ```bash
-fprintd-enroll -f right-index-finger
-fprintd-verify
+omarchy-setup-security-fingerprint
 ```
 
----
+That is intentionally left to Omarchy because Omarchy owns its own sudo,
+polkit and lock-screen fingerprint integration.
 
-## 7. Final persistence test — reboot only when YOU want
+## 10. Final verification
 
-The final reboot is not needed to make the fixes active. It is only the clean
-persistence proof that everything comes back by itself.
-
-When you are ready:
-
-```bash
-systemctl reboot
-```
-
-After login, wait roughly 45–60 seconds and run:
+Check:
 
 ```bash
 cat /var/lib/honor/health-last.txt
 ```
 
-Expected final line:
+Healthy output ends with:
 
 ```text
 RESULT: OK
 ```
 
-If `RESULT: OK`, the setup survived a completely clean boot.
+Useful direct checks:
 
----
+```bash
+cat /sys/module/xe/parameters/enable_psr
+ls -ld /sys/class/leds/honor::kbd_backlight
+sudo cat /sys/kernel/debug/dri/*/eDP-*/i915_dsc_fec_support
+sudo grep -m1 -E 'pipe src=.*bpp=' /sys/kernel/debug/dri/*/i915_display_info
+fprintd-list "$USER"
+```
 
-## 8. Keyboard backlight behavior
+For this panel the intended display state is DSC active, `bpp=30`, and
+`dither=no`.
 
-KDE controls the physical keyboard backlight through
-`/sys/class/leds/honor::kbd_backlight`.
+## Updates
 
-Firmware `Fn+Space` also changes the physical backlight. They are intentionally
-not synchronized through periodic EC polling, so using `Fn+Space` can leave the
-visual KDE slider temporarily out of sync. This avoids a permanent polling loop
-and unnecessary wakeups.
+Normal Omarchy updates remain normal:
 
----
+```bash
+omarchy-update
+```
 
-## 9. Updates
-
-After a normal Bazzite update and reboot:
+After a kernel update and reboot, wait about one minute and inspect:
 
 ```bash
 cat /var/lib/honor/health-last.txt
 ```
 
-If it says `RESULT: OK`, do nothing.
+The HID-BPF objects are CO-RE. The keyboard-backlight service rebuilds its
+small module against the headers for the kernel that is actually running.
 
-If a new deployment breaks the machine and the system still boots:
-
-```bash
-sudo rpm-ostree rollback
-systemctl reboot
-```
-
-The package transaction, boot staging, reboots, rollback and package removal
-remain explicit user actions by design.
+See [UPDATES.md](UPDATES.md), [TROUBLESHOOTING.md](TROUBLESHOOTING.md), and
+[BIOS-UPDATE.md](BIOS-UPDATE.md) for the recovery paths.

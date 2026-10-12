@@ -1,14 +1,38 @@
 # HONOR ZQC-P M1230 keyboard backlight
 
-Small out-of-tree LED-class driver used by this Bazzite setup. It is DMI-bound
-to `HONOR / ZQC-P / M1230`, checks the firmware DSDT for `KBBL/GKBM/SKBM`, and
-registers `honor::kbd_backlight` so UPower/KDE can control the physical keyboard
-backlight.
+Small out-of-tree LED-class driver used by the Omarchy adaptation.
 
-The boot service rebuilds the module when `uname -r` changes and labels the new
-`.ko` as `modules_object_t` before `insmod`, which is required by SELinux on the
-tested Bazzite system.
+It is intentionally restricted to:
 
-There is intentionally no periodic EC polling. `Fn+Space` remains firmware-side
-and may not visually move the KDE slider; the slider itself still controls the
-hardware.
+```text
+DMI_SYS_VENDOR    HONOR
+DMI_PRODUCT_NAME  ZQC-P
+DMI_BOARD_VERSION M1230
+```
+
+The installer also checks that the running DSDT contains the expected `KBBL`,
+`GKBM` and `SKBM` symbols before permitting EC writes.
+
+Install through the main flow:
+
+```bash
+sudo ./install.sh --yes
+```
+
+or directly:
+
+```bash
+sudo ./honor-zqcp-kbdlight/install-omarchy.sh
+```
+
+When loaded it exposes:
+
+```text
+/sys/class/leds/honor::kbd_backlight
+```
+
+with brightness values `0`, `1`, `2`.
+
+The systemd service rebuilds the module for the running kernel when its cached
+vermagic no longer matches. Matching Omarchy kernel headers must remain
+installed.

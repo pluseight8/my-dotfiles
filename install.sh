@@ -1,9 +1,9 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-ORIGINAL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-source "$ORIGINAL_ROOT/scripts/lib/common.sh"
+source "$ROOT/scripts/lib/common.sh"
 
 YES=0
 for arg in "$@"; do
@@ -13,14 +13,10 @@ for arg in "$@"; do
             cat <<'HELP'
 Usage: sudo ./install.sh [--yes]
 
-POST-REBOOT installer only.
+POST-REBOOT runtime installer for HONOR ZQC-P/M1230 on Omarchy.
 
-It refuses to run until the manual pre-reboot phase is active:
-- dependencies already installed and booted
-- audited ACPI override active
-- xe.enable_psr=1 active
-
-This script does NOT run rpm-ostree and does NOT reboot the machine.
+It refuses to run until the staged ACPI override and xe.enable_psr=1 are
+actually active in the current boot. It never reboots the machine.
 HELP
             exit 0
             ;;
@@ -29,174 +25,144 @@ HELP
 done
 
 require_root
-assert_bazzite
+assert_omarchy
 assert_m1230
+assert_omarchy_kernel
+assert_lockdown_off
 assert_host_dependencies_present
-assert_secure_boot_off
-assert_selinux_enforcing
-assert_kernel_build_tree
-require_cmds git python3 systemctl md5sum install find awk grep flock ldconfig lsusb authselect
+assert_matching_headers
+assert_hid_bpf_kernel_support
+require_cmds git python3 systemctl md5sum install find awk grep lsusb ldconfig journalctl
 
-if [[ "$ORIGINAL_ROOT" != "$HONOR_REPO_INSTALL_DIR" ]]; then
-    log "copying installer payload to $HONOR_REPO_INSTALL_DIR"
-    safe_rm_tree "$HONOR_REPO_INSTALL_DIR"
-    install -d -m755 "$(dirname "$HONOR_REPO_INSTALL_DIR")"
-    cp -a "$ORIGINAL_ROOT" "$HONOR_REPO_INSTALL_DIR"
-    exec /usr/bin/bash "$HONOR_REPO_INSTALL_DIR/install.sh" "$@"
-fi
+[[ -d "$HONOR_UPSTREAM_DIR/.git" ]] \
+    || die "prepared HONOR source missing; run preflight.sh and stage-boot.sh first"
+grep -q '^\[board M1230\]$' "$HONOR_UPSTREAM_DIR/devices/zqc-p.conf" \
+    || die "M1230 adaptation missing from the pinned HONOR source"
 
-REPO_ROOT="$HONOR_REPO_INSTALL_DIR"
-# shellcheck source=/dev/null
-source "$REPO_ROOT/scripts/lib/common.sh"
+TARGET_USER="${SUDO_USER:-}"
+[[ -n "$TARGET_USER" && "$TARGET_USER" != root ]] \
+    || die "run sudo from your normal Omarchy desktop account"
 
 install -d -m755 "$HONOR_STATE_DIR"
 touch "$HONOR_LOG"
 chmod 600 "$HONOR_LOG"
 exec > >(tee -a "$HONOR_LOG") 2>&1
 exec 9>"$HONOR_STATE_DIR/install.lock"
-flock -n 9 || die "another HONOR M1230 installation process is already running"
+flock -n 9 || die "another HONOR M1230 installation is already running"
 
-TARGET_USER="${SUDO_USER:-}"
-[[ -n "$TARGET_USER" && "$TARGET_USER" != root ]] || die "run sudo from your normal desktop account"
-
-cat > /etc/honor-m1230.conf <<EOFCONF
+cat > /etc/honor-m1230.conf <<EOF
 HONOR_USER=$TARGET_USER
-EOFCONF
+EOF
 chmod 644 /etc/honor-m1230.conf
+
+verify_boot_stage() {
+    log "verifying the rebooted boot stage"
+
+    local klog live_hash psr
+    klog="$(journalctl -k -b --no-pager 2>/dev/null || true)"
+
+    grep -qiE 'Table Upgrade:.*I2C_DEVT|ACPI:.*I2C_DEVT.*override' <<<"$klog" \
+        || die "the I2C_DEVT ACPI override is not confirmed in this boot; rerun stage-boot.sh and reboot"
+    ! grep -qE 'AE_AML_INTERNAL.*I2C_DEVT|I2C_DEVT.*AE_AML_INTERNAL' <<<"$klog" \
+        || die "I2C_DEVT returned AE_AML_INTERNAL after the override"
+    ! grep -qi 'locked down.*table override' <<<"$klog" \
+        || die "kernel lockdown rejected the ACPI override"
+
+    live_hash="$(current_i2c_hash)" || die "live I2C_DEVT not found"
+    [[ "$live_hash" == "$HONOR_ACPI_PATCHED_MD5" ]] \
+        || die "current I2C_DEVT is not the audited patched table: $live_hash"
+
+    compgen -G '/sys/bus/hid/devices/*2808:5662*' >/dev/null \
+        || die "touchscreen 2808:5662 is missing after the ACPI override"
+    { compgen -G '/sys/bus/hid/devices/*27C6:0F9A*' >/dev/null \
+      || compgen -G '/sys/bus/hid/devices/*27c6:0f9a*' >/dev/null; } \
+        || die "touchpad 27c6:0f9a is missing after the ACPI override"
+
+    psr="$(cat /sys/module/xe/parameters/enable_psr 2>/dev/null || true)"
+    [[ "$psr" == 1 ]] || die "xe.enable_psr is '${psr:-missing}', expected 1"
+
+    log "boot stage is active"
+}
 
 if (( ! YES )); then
     cat <<'CONFIRM'
-This installs the post-reboot HONOR M1230 runtime fixes:
-- HID-BPF micmute/touchpad-edge
-- private fingerprint libfprint
-- keyboard-backlight module/service
-- DSC service
-- boot health-check
+This installs the post-reboot M1230 runtime fixes:
+- touchscreen mic-mute HID-BPF
+- touchpad-edge HID-BPF
+- EgisTec 1c7a:05aa SDCP fingerprint driver
+- keyboard-backlight LED module/service
+- DSC force service
+- boot health-check timer
 
-It will NOT modify rpm-ostree and will NOT reboot.
+It does NOT replace xe.ko, does NOT edit Omarchy's /etc/default/limine and
+does NOT reboot.
 Type INSTALL to continue:
 CONFIRM
     read -r answer
     [[ "$answer" == INSTALL ]] || die "cancelled"
 fi
 
-verify_manual_pre_reboot_phase() {
-    log "verifying the manual pre-reboot phase"
+verify_boot_stage
 
-    [[ -d "$HONOR_UPSTREAM_DIR/.git" ]] || die "prepared HONOR support source missing; run sudo ./preflight.sh --yes and complete the manual boot-staging block first"
-    grep -q "^\[board M1230\]$" "$HONOR_UPSTREAM_DIR/devices/zqc-p.conf" || die "M1230 adaptation missing from HONOR support source"
+log "installing touchscreen mic-mute HID-BPF"
+retry 2 10 env ALLOW_UNVERIFIED=1 \
+    bash "$HONOR_UPSTREAM_DIR/patch/micmute/install.sh" \
+    || die "micmute HID-BPF install failed"
 
-    local klog
-    klog="$(journalctl -k -b --no-pager 2>/dev/null || true)"
-    grep -q 'Table Upgrade: override.*I2C_DEVT' <<<"$klog" || die "ACPI I2C_DEVT override is not active; reboot the staged deployment before running install.sh"
-    ! grep -qE 'AE_AML_INTERNAL.*I2C_DEVT|I2C_DEVT.*AE_AML_INTERNAL' <<<"$klog" || die "AE_AML_INTERNAL returned after ACPI override"
-    ! grep -qi 'locked down.*table override' <<<"$klog" || die "kernel lockdown rejected the ACPI override"
+log "installing touchpad left-edge brightness HID-BPF"
+retry 2 10 env ALLOW_UNVERIFIED=1 \
+    bash "$HONOR_UPSTREAM_DIR/patch/touchpad-edge/install.sh" \
+    || die "touchpad-edge HID-BPF install failed"
 
-    compgen -G '/sys/bus/hid/devices/*2808:5662*' >/dev/null || die "touchscreen 2808:5662 missing"
-    { compgen -G '/sys/bus/hid/devices/*27C6:0F9A*' >/dev/null || compgen -G '/sys/bus/hid/devices/*27c6:0f9a*' >/dev/null; } || die "touchpad 27c6:0f9a missing"
-    [[ "$(cat /sys/module/xe/parameters/enable_psr 2>/dev/null || true)" == 1 ]] || die "xe.enable_psr is not active; reboot the staged deployment first"
-}
+log "installing EgisTec 1c7a:05aa SDCP fingerprint support"
+lsusb -d "$HONOR_FINGERPRINT_ID" >/dev/null 2>&1 \
+    || die "fingerprint reader $HONOR_FINGERPRINT_ID is not on the USB bus"
+retry 2 10 env ALLOW_UNVERIFIED=1 \
+    bash "$HONOR_UPSTREAM_DIR/patch/fingerprint/install.sh" \
+    || die "fingerprint support install failed"
+ldconfig
+systemctl try-restart fprintd.service >/dev/null 2>&1 || true
 
-install_hid_bpf() {
-    log "installing touchscreen micmute HID-BPF"
-    retry 3 10 env ALLOW_UNVERIFIED=1 \
-        bash "$HONOR_UPSTREAM_DIR/patch/micmute/install.sh" || die "micmute HID-BPF install failed"
+log "installing M1230 keyboard backlight support"
+bash "$ROOT/honor-zqcp-kbdlight/install-omarchy.sh"
 
-    log "installing touchpad left-edge brightness HID-BPF"
-    retry 3 10 env ALLOW_UNVERIFIED=1 \
-        bash "$HONOR_UPSTREAM_DIR/patch/touchpad-edge/install.sh" || die "touchpad-edge HID-BPF install failed"
+log "installing DSC force service"
+install -d -m755 /usr/local/lib/honor
+install -m755 "$ROOT/scripts/force-dsc.sh" /usr/local/lib/honor/force-dsc.sh
+install -m644 "$ROOT/systemd/honor-force-dsc.service" /etc/systemd/system/honor-force-dsc.service
+systemctl daemon-reload
+systemctl enable honor-force-dsc.service >/dev/null
+systemctl restart honor-force-dsc.service
+systemctl is-active --quiet honor-force-dsc.service \
+    || die "honor-force-dsc.service did not become active"
 
-    [[ -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o ]] || die "micmute BPF object missing"
-    [[ -f /etc/udev-hid-bpf/honor-tops0102-edge.bpf.o ]] || die "touchpad-edge BPF object missing"
-}
+log "installing boot health check"
+install -m755 "$ROOT/scripts/health-check.sh" /usr/local/lib/honor/health-check.sh
+install -m644 "$ROOT/systemd/honor-health-check.service" /etc/systemd/system/honor-health-check.service
+install -m644 "$ROOT/systemd/honor-health-check.timer" /etc/systemd/system/honor-health-check.timer
+systemctl daemon-reload
+systemctl enable --now honor-health-check.timer >/dev/null
 
-install_fingerprint() {
-    log "installing private SDCP libfprint for EgisTec 1c7a:05aa"
-    lsusb -d "$HONOR_FINGERPRINT_ID" >/dev/null 2>&1 || die "fingerprint reader $HONOR_FINGERPRINT_ID is not on USB bus"
-    retry 3 10 env ALLOW_UNVERIFIED=1 \
-        bash "$HONOR_UPSTREAM_DIR/patch/fingerprint/install.sh" || die "fingerprint support install failed"
-    ldconfig
-    systemctl restart fprintd.service 2>/dev/null || true
-    [[ -d /opt/honor-libfprint-sdcp ]] || die "private SDCP libfprint prefix missing"
-    ldconfig -p | grep -q '/opt/honor-libfprint-sdcp' || die "private SDCP libfprint not in ld cache"
-
-    if ! authselect enable-feature with-fingerprint; then
-        warn "authselect could not enable with-fingerprint automatically; fprintd itself is installed"
-    fi
-}
-
-install_keyboard_backlight() {
-    log "installing M1230 keyboard backlight driver"
-    bash "$REPO_ROOT/honor-zqcp-kbdlight/install-bazzite.sh"
-    systemctl is-active --quiet honor-zqcp-kbdlight.service || die "keyboard backlight service not active"
-    [[ -d /sys/class/leds/honor::kbd_backlight ]] || die "honor::kbd_backlight missing"
-}
-
-install_dsc() {
-    log "installing DSC service"
-    install -d -m755 /usr/local/lib/honor
-    install -m755 "$REPO_ROOT/scripts/force-dsc.sh" /usr/local/lib/honor/force-dsc.sh
-    install -m644 "$REPO_ROOT/systemd/honor-force-dsc.service" /etc/systemd/system/honor-force-dsc.service
-    systemctl daemon-reload
-    systemctl enable honor-force-dsc.service >/dev/null
-    systemctl restart honor-force-dsc.service
-    systemctl is-active --quiet honor-force-dsc.service || die "DSC service not active"
-
-    local dsc_file display_info pipe
-    dsc_file="$(find /sys/kernel/debug/dri -path '*/eDP-*/i915_dsc_fec_support' -print -quit 2>/dev/null || true)"
-    [[ -n "$dsc_file" ]] || die "DSC debugfs file missing"
-    grep -q 'DSC_Enabled: yes' "$dsc_file" || die "DSC is not active"
-    grep -q 'Force_DSC_Enable: yes' "$dsc_file" || die "DSC force is not enabled"
-
-    display_info="$(find /sys/kernel/debug/dri -name i915_display_info -print -quit 2>/dev/null || true)"
-    [[ -n "$display_info" ]] || die "i915_display_info missing"
-    pipe="$(grep -m1 -E 'pipe src=.*bpp=' "$display_info" 2>/dev/null || true)"
-    grep -q 'bpp=30' <<<"$pipe" || die "display is not bpp=30"
-    grep -q 'dither=no' <<<"$pipe" || die "display still uses dithering"
-}
-
-install_health_check() {
-    log "installing boot health check"
-    install -m755 "$REPO_ROOT/scripts/health-check.sh" /usr/local/lib/honor/health-check.sh
-    install -m644 "$REPO_ROOT/systemd/honor-health-check.service" /etc/systemd/system/honor-health-check.service
-    install -m644 "$REPO_ROOT/systemd/honor-health-check.timer" /etc/systemd/system/honor-health-check.timer
-    systemctl daemon-reload
-    systemctl enable honor-health-check.timer >/dev/null
-    systemctl restart honor-health-check.timer
-}
-
-verify_manual_pre_reboot_phase
-install_hid_bpf
-install_fingerprint
-install_keyboard_backlight
-install_dsc
-install_health_check
-
-systemctl restart upower.service 2>/dev/null || true
-restart_powerdevil_for_user "$TARGET_USER"
-
-log "running current-boot health check"
+log "running the health check now"
 if ! HONOR_USER="$TARGET_USER" /usr/local/lib/honor/health-check.sh; then
-    die "current-boot health check failed; see /var/lib/honor/health-last.txt"
+    die "health check failed; see /var/lib/honor/health-last.txt"
 fi
 
-printf 'installed=%s\nkernel=%s\nuser=%s\n' \
-    "$(date --iso-8601=seconds)" "$(uname -r)" "$TARGET_USER" \
+printf 'installed=%s\nkernel=%s\nuser=%s\nomarchy=%s\n' \
+    "$(date --iso-8601=seconds)" "$(uname -r)" "$TARGET_USER" "$(omarchy-version)" \
     > "$HONOR_STATE_DIR/runtime-install-complete"
 chmod 600 "$HONOR_STATE_DIR/runtime-install-complete"
 
 echo
 log "RUNTIME INSTALL: OK"
-echo "No reboot was performed by install.sh."
 echo
-echo "For the final persistence test, reboot yourself when you are ready:"
-echo "  systemctl reboot"
+echo "No reboot was performed."
 echo
-echo "After login wait about 60 seconds, then:"
+echo "Now, as your NORMAL user, let Omarchy enroll the finger and configure"
+echo "sudo / polkit / the Omarchy lock screen:"
+echo
+echo "  omarchy-setup-security-fingerprint"
+echo
+echo "After any Omarchy/kernel update, wait about a minute after reboot and run:"
+echo
 echo "  cat /var/lib/honor/health-last.txt"
-echo
-echo "Expected final line: RESULT: OK"
-echo
-echo "Fingerprint enrollment (normal user):"
-echo "  fprintd-enroll -f right-index-finger"
-echo "  fprintd-verify"

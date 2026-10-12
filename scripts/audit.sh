@@ -22,85 +22,101 @@ else
 fi
 rm -rf "$ROOT/scripts/__pycache__"
 
-# Dangerous-pattern policy ----------------------------------------------------
+# Executable safety policy -----------------------------------------------------
+mapfile -d '' EXE_FILES < <(
+    find "$ROOT" -type f \( -name '*.sh' -o -name '*.py' \) \
+        ! -name audit.sh -print0
+)
+
 check_absent() {
     local pattern="$1" label="$2"
-    local files=()
-    mapfile -d '' files < <(find "$ROOT" -type f \( -name '*.sh' -o -name '*.py' \) ! -name audit.sh -print0)
-    if grep -nHE "$pattern" "${files[@]}" >/dev/null 2>&1; then
+    if grep -nHE "$pattern" "${EXE_FILES[@]}" >/dev/null 2>&1; then
         fail "$label"
-        grep -nHE "$pattern" "${files[@]}" >&2 || true
+        grep -nHE "$pattern" "${EXE_FILES[@]}" >&2 || true
     else
         pass "$label"
     fi
 }
 
-check_absent 'setenforce[[:space:]]+0|SELINUX=disabled|selinux=0' 'no global SELinux disable'
-check_absent 'rpm-ostree[[:space:]]+reset' 'no destructive rpm-ostree reset'
-check_absent 'rpm-ostree[[:space:]]+install' 'installer never layers packages automatically'
-check_absent 'i8042\.dumbkbd' 'no obsolete i8042.dumbkbd'
-check_absent 'patch/(edp-dsc|cdclk-ptl)/install\.sh' 'no custom xe/CDCLK installers'
+check_absent 'rpm-ostree' 'no rpm-ostree/Bazzite executable path'
+check_absent 'setenforce[[:space:]]+0|SELINUX=disabled|selinux=0' 'no SELinux/lockdown bypass'
 check_absent 'curl[^\n]*\|[^\n]*(bash|sh)|wget[^\n]*\|[^\n]*(bash|sh)' 'no curl/wget pipe-to-shell'
+check_absent 'patch/(edp-dsc|cdclk-ptl)/install\.sh' 'no custom xe/CDCLK installer'
 check_absent 'sudo[[:space:]]+rm[[:space:]]+-rf[[:space:]]+/' 'no raw sudo rm -rf on absolute paths'
 
-# Explicit reboot/package boundary --------------------------------------------
-mapfile -t EXEC_SCRIPTS < <(find "$ROOT" -type f -name '*.sh' ! -name audit.sh -print)
-if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?systemctl[[:space:]]+reboot([[:space:]]|$)' \
-    "${EXEC_SCRIPTS[@]}" >/dev/null 2>&1; then
+# The user owns package installation.
+for main in preflight.sh stage-boot.sh install.sh; do
+    if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?pacman[[:space:]]+-S' "$ROOT/$main" >/dev/null 2>&1; then
+        fail "$main installs packages"
+    else
+        pass "$main does not install packages"
+    fi
+done
+
+# No script crosses the reboot boundary itself.
+if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?(systemctl[[:space:]]+reboot|reboot|shutdown[[:space:]]+-r)([[:space:]]|$)' \
+    "${EXE_FILES[@]}" >/dev/null 2>&1; then
     fail "a script automatically reboots the machine"
 else
     pass "no script automatically reboots the machine"
 fi
 
-if grep -nE '^[[:space:]]*(sudo[[:space:]]+)?rpm-ostree[[:space:]]+' "$ROOT/install.sh" >/dev/null 2>&1; then
-    fail "install.sh executes rpm-ostree"
+# Omarchy owns /etc/default/limine. Reading it is allowed; writing it is not.
+if grep -nE '(sed[[:space:]]+-i.*|tee[[:space:]]+|>[[:space:]]*)/etc/default/limine' \
+    "${EXE_FILES[@]}" >/dev/null 2>&1; then
+    fail "a script writes /etc/default/limine"
 else
-    pass "install.sh is rpm-ostree-free"
+    pass "no script writes /etc/default/limine"
 fi
 
-# Required hardening -----------------------------------------------------------
+# Required pins/invariants -----------------------------------------------------
 grep -q "HONOR_UPSTREAM_COMMIT='[0-9a-f]\{40\}'" "$ROOT/config/m1230.env" \
     && pass 'HONOR upstream pinned by full commit SHA' \
     || fail 'HONOR upstream is not pinned by full SHA'
 
+grep -q "HONOR_UPSTREAM_TREE='[0-9a-f]\{40\}'" "$ROOT/config/m1230.env" \
+    && pass 'HONOR upstream tree pinned' \
+    || fail 'HONOR upstream tree is not pinned'
+
 grep -q "HONOR_ACPI_STOCK_MD5='27bb4879b5af49ac2b613a73cf1ffa0b'" "$ROOT/config/m1230.env" \
-    && pass 'stock ACPI hash pinned' || fail 'stock ACPI hash missing'
+    && pass 'stock ACPI hash pinned' \
+    || fail 'stock ACPI hash missing'
 
 grep -q "HONOR_ACPI_PATCHED_MD5='0ed8b48df42f797b55714fab5aadaf42'" "$ROOT/config/m1230.env" \
-    && pass 'patched ACPI hash pinned' || fail 'patched ACPI hash missing'
+    && pass 'patched ACPI hash pinned' \
+    || fail 'patched ACPI hash missing'
 
-grep -q 'SELinuxContext=system_u:system_r:unconfined_service_t:s0' "$ROOT/systemd/honor-force-dsc.service" \
-    && pass 'DSC has per-service SELinux context' || fail 'DSC SELinux context missing'
+grep -q 'status=probed' "$ROOT/scripts/prepare-honor-upstream.py" \
+    && pass 'M1230 profile stays below verified' \
+    || fail 'M1230 trust level changed'
 
-grep -q 'ExecStart=/usr/bin/bash /usr/local/lib/honor/force-dsc.sh' "$ROOT/systemd/honor-force-dsc.service" \
-    && pass 'DSC uses standard bash entrypoint' || fail 'DSC bash entrypoint missing'
+grep -q 'fixes=acpi-override psr-band micmute touchpad-edge fingerprint' \
+    "$ROOT/scripts/prepare-honor-upstream.py" \
+    && pass 'M1230 only lists audited Tier-A upstream fixes' \
+    || fail 'M1230 fix allow-list changed'
 
-grep -q 'DMI_MATCH(DMI_BOARD_VERSION, "M1230")' "$ROOT/honor-zqcp-kbdlight/honor_zqcp_kbdlight.c" \
-    && pass 'keyboard module DMI-bound to M1230' || fail 'keyboard module DMI guard missing'
+grep -q 'HOOKS+=(acpi_override)' "$ROOT/stage-boot.sh" \
+    && pass 'mkinitcpio ACPI hook installed through drop-in' \
+    || fail 'mkinitcpio ACPI drop-in missing'
 
-if grep -qE 'poll_ms|schedule_delayed_work\(&sync|sync_work' "$ROOT/honor-zqcp-kbdlight/honor_zqcp_kbdlight.c"; then
-    fail 'keyboard driver contains periodic Fn+Space polling'
+grep -q 'KERNEL_CMDLINE\[default\]+=" xe.enable_psr=1"' "$ROOT/stage-boot.sh" \
+    && pass 'Omarchy Limine drop-in carries PSR setting' \
+    || fail 'Omarchy PSR drop-in missing'
+
+grep -q 'limine-mkinitcpio' "$ROOT/stage-boot.sh" \
+    && pass 'Omarchy boot images rebuilt with limine-mkinitcpio' \
+    || fail 'limine-mkinitcpio missing'
+
+grep -q 'DMI_MATCH(DMI_BOARD_VERSION, "M1230")' \
+    "$ROOT/honor-zqcp-kbdlight/honor_zqcp_kbdlight.c" \
+    && pass 'keyboard module DMI-bound to M1230' \
+    || fail 'keyboard module DMI guard missing'
+
+if [[ -e "$ROOT/honor-zqcp-kbdlight/install-bazzite.sh" ]]; then
+    fail 'obsolete Bazzite keyboard installer still exists'
 else
-    pass 'keyboard driver has no periodic Fn+Space polling'
+    pass 'obsolete Bazzite keyboard installer removed'
 fi
-
-# Official-source document allowlist ------------------------------------------
-python3 - "$ROOT/docs/OFFICIAL-SOURCES.md" <<'PY' || FAIL=1
-import re, sys
-from urllib.parse import urlparse
-p=sys.argv[1]
-text=open(p, encoding='utf-8').read()
-allowed_prefixes=(
-    'https://docs.bazzite.gg/',
-    'https://github.com/ublue-os/bazzite',
-    'https://github.com/fedora-selinux/selinux-policy',
-)
-for u in re.findall(r'https?://[^\s)]+', text):
-    if not u.startswith(allowed_prefixes):
-        print(f'[FAIL] non-official source URL: {u}', file=sys.stderr)
-        raise SystemExit(1)
-print('[PASS] official-source document uses allowlisted hosts')
-PY
 
 # Optional shellcheck ----------------------------------------------------------
 if command -v shellcheck >/dev/null 2>&1; then
@@ -112,15 +128,6 @@ if command -v shellcheck >/dev/null 2>&1; then
     fi
 else
     printf '[SKIP] shellcheck is not installed; bash parser checks still passed\n'
-fi
-
-# Git whitespace if this is a checkout ---------------------------------------
-if [[ -d "$ROOT/.git" ]] && command -v git >/dev/null 2>&1; then
-    if git -C "$ROOT" diff --check; then
-        pass 'git diff --check'
-    else
-        fail 'git diff --check'
-    fi
 fi
 
 if (( FAIL )); then

@@ -12,16 +12,34 @@ bad()  { echo "[FAIL] $*"; FAIL=1; }
 
 USER_NAME="${HONOR_USER:-}"
 
-printf 'HONOR ZQC-P M1230 health check\n'
-printf 'kernel: %s\n\n' "$(uname -r)"
+printf 'HONOR ZQC-P M1230 / Omarchy health check\n'
+printf 'omarchy: %s\n' "$(omarchy-version 2>/dev/null || echo unknown)"
+printf 'kernel:  %s\n\n' "$(uname -r)"
+
+if command -v omarchy-version >/dev/null 2>&1; then
+    ok "Omarchy detected"
+else
+    bad "Omarchy command set missing"
+fi
+
+PKGBASE="$(cat "/usr/lib/modules/$(uname -r)/pkgbase" 2>/dev/null || true)"
+[[ "$PKGBASE" == linux-omarchy* ]] \
+    && ok "Omarchy kernel pkgbase: $PKGBASE" \
+    || bad "unexpected kernel pkgbase: ${PKGBASE:-missing}"
 
 KLOG="$(journalctl -k -b --no-pager 2>/dev/null || true)"
 if grep -qE 'AE_AML_INTERNAL.*I2C_DEVT|I2C_DEVT.*AE_AML_INTERNAL' <<<"$KLOG"; then
     bad "ACPI I2C_DEVT returned AE_AML_INTERNAL"
-elif grep -q 'Table Upgrade: override.*I2C_DEVT' <<<"$KLOG"; then
+elif grep -qiE 'Table Upgrade:.*I2C_DEVT|ACPI:.*I2C_DEVT.*override' <<<"$KLOG"; then
     ok "ACPI I2C_DEVT override active"
 else
     bad "ACPI I2C_DEVT override not confirmed"
+fi
+
+if grep -q 'CPU pipe .* FIFO underrun' <<<"$KLOG"; then
+    warn "this boot logged a display FIFO underrun"
+else
+    ok "no display FIFO underrun in this boot"
 fi
 
 if compgen -G '/sys/bus/hid/devices/*2808:5662*' >/dev/null; then
@@ -38,7 +56,9 @@ else
 fi
 
 PSR="$(cat /sys/module/xe/parameters/enable_psr 2>/dev/null || true)"
-[[ "$PSR" == "1" ]] && ok "xe.enable_psr=1" || bad "xe.enable_psr=${PSR:-missing}"
+[[ "$PSR" == 1 ]] \
+    && ok "xe.enable_psr=1" \
+    || bad "xe.enable_psr=${PSR:-missing}"
 
 [[ -f /etc/udev-hid-bpf/honor-ftsc1000-micmute.bpf.o ]] \
     && ok "micmute HID-BPF object installed" \
@@ -72,21 +92,30 @@ systemctl is-active --quiet honor-force-dsc.service \
     && ok "DSC service active" \
     || bad "DSC service not active"
 
-mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
-DSC_FILE="$(find /sys/kernel/debug/dri -path '*/eDP-*/i915_dsc_fec_support' -print -quit 2>/dev/null || true)"
+mountpoint -q /sys/kernel/debug \
+    || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null \
+    || true
+
+DSC_FILE="$(find /sys/kernel/debug/dri \
+    -path '*/eDP-*/i915_dsc_fec_support' \
+    -print -quit 2>/dev/null || true)"
 if [[ -n "$DSC_FILE" ]]; then
     DSC="$(cat "$DSC_FILE" 2>/dev/null || true)"
     grep -q 'DSC_Sink_Support: yes' <<<"$DSC" \
-        && ok "DSC sink supported" || bad "DSC sink unsupported"
+        && ok "DSC sink supported" \
+        || bad "DSC sink unsupported"
     grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
-        && ok "DSC force enabled" || bad "DSC force not enabled"
+        && ok "DSC force enabled" \
+        || bad "DSC force not enabled"
     grep -q 'DSC_Enabled: yes' <<<"$DSC" \
-        && ok "DSC active" || bad "DSC forced but not active"
+        && ok "DSC active" \
+        || bad "DSC forced but not active"
 else
     bad "i915_dsc_fec_support missing"
 fi
 
-DISPLAY_INFO="$(find /sys/kernel/debug/dri -name i915_display_info -print -quit 2>/dev/null || true)"
+DISPLAY_INFO="$(find /sys/kernel/debug/dri \
+    -name i915_display_info -print -quit 2>/dev/null || true)"
 if [[ -n "$DISPLAY_INFO" ]]; then
     PIPE="$(grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO" 2>/dev/null || true)"
     if grep -q 'bpp=30' <<<"$PIPE" && grep -q 'dither=no' <<<"$PIPE"; then
@@ -100,22 +129,18 @@ else
     bad "i915_display_info missing"
 fi
 
-FP_PRESENT=0
-for d in /sys/bus/usb/devices/*; do
-    [[ -r "$d/idVendor" && -r "$d/idProduct" ]] || continue
-    if [[ "$(cat "$d/idVendor")" == "1c7a" && "$(cat "$d/idProduct")" == "05aa" ]]; then
-        FP_PRESENT=1
-        break
-    fi
-done
-(( FP_PRESENT )) && ok "fingerprint USB 1c7a:05aa present" || bad "fingerprint USB 1c7a:05aa missing"
+if lsusb -d 1c7a:05aa >/dev/null 2>&1; then
+    ok "fingerprint USB 1c7a:05aa present"
+else
+    bad "fingerprint USB 1c7a:05aa missing"
+fi
 
 if [[ -d /opt/honor-libfprint-sdcp ]]; then
-    ok "private SDCP libfprint directory exists"
+    ok "private SDCP libfprint installed"
     if ldconfig -p 2>/dev/null | grep -q '/opt/honor-libfprint-sdcp'; then
-        ok "private SDCP libfprint is in ld cache"
+        ok "private SDCP libfprint is in the loader cache"
     else
-        bad "private SDCP libfprint missing from ld cache"
+        bad "private SDCP libfprint missing from loader cache"
     fi
 else
     bad "/opt/honor-libfprint-sdcp missing"
@@ -126,7 +151,7 @@ if [[ -n "$USER_NAME" ]] && command -v fprintd-list >/dev/null 2>&1; then
     if grep -qiE 'no fingers enrolled|finger' <<<"$FP_OUT"; then
         ok "fprintd responds for $USER_NAME"
     else
-        warn "fprintd check inconclusive for $USER_NAME"
+        warn "fprintd response for $USER_NAME was inconclusive"
     fi
 fi
 

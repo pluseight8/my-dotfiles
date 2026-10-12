@@ -1,24 +1,44 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug
+if ! mountpoint -q /sys/kernel/debug; then
+    mount -t debugfs debugfs /sys/kernel/debug
+fi
 
-for _ in $(seq 1 150); do
-    DSC_FILE=$(find /sys/kernel/debug/dri \
-      -path '*/eDP-*/i915_dsc_fec_support' \
-      -print -quit 2>/dev/null || true)
-
-    if [[ -n "$DSC_FILE" ]]; then
-        grep -q 'DSC_Sink_Support: yes' "$DSC_FILE" || {
-            echo "HONOR: panel does not report DSC support" >&2
-            exit 1
-        }
-        echo 1 > "$DSC_FILE"
-        exit 0
-    fi
-
-    sleep 0.2
+DSC_FILE=""
+for _ in $(seq 1 200); do
+    DSC_FILE="$(find /sys/kernel/debug/dri \
+        -path '*/eDP-*/i915_dsc_fec_support' \
+        -print -quit 2>/dev/null || true)"
+    [[ -n "$DSC_FILE" ]] && break
+    sleep 0.1
 done
 
-echo "HONOR: i915_dsc_fec_support not found" >&2
+[[ -n "$DSC_FILE" ]] || {
+    echo "HONOR: i915_dsc_fec_support not found" >&2
+    exit 1
+}
+
+grep -q 'DSC_Sink_Support: yes' "$DSC_FILE" || {
+    echo "HONOR: internal panel does not report DSC support" >&2
+    exit 1
+}
+
+[[ -w "$DSC_FILE" ]] || {
+    echo "HONOR: DSC debugfs control is not writable" >&2
+    exit 1
+}
+
+echo 1 > "$DSC_FILE"
+
+for _ in $(seq 1 50); do
+    if grep -q 'Force_DSC_Enable: yes' "$DSC_FILE" \
+       && grep -q 'DSC_Enabled: yes' "$DSC_FILE"; then
+        exit 0
+    fi
+    sleep 0.1
+done
+
+echo "HONOR: DSC was requested but did not become active" >&2
+cat "$DSC_FILE" >&2 || true
 exit 1

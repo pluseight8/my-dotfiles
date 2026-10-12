@@ -1,76 +1,62 @@
-# HONOR MagicBook Pro 14 2026 AI (ZQC-P / M1230) — Bazzite setup
+# HONOR MagicBook Pro 14 2026 AI (ZQC-P / M1230) — Omarchy
 
-Personal, fail-closed hardware setup for **Bazzite KDE** on the exact laptop:
+Hardware bring-up for the exact **HONOR ZQC-P / M1230** laptop on current
+**Omarchy**.
+
+This repository adapts the research and fixes from
+[`rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010`](https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010)
+without blindly running its generic `apply_patch.sh`.
+
+The target machine is intentionally fail-closed:
 
 - vendor: `HONOR`
 - product: `ZQC-P`
-- board: `M1230`
+- board revision: `M1230`
 - board name: `ZQC-P-PCB`
 - touchscreen: `2808:5662`
 - touchpad: `27c6:0f9a`
 - fingerprint: `1c7a:05aa`
+- audio subsystem: `1ee7:209d`
 
-The old CachyOS/DriftWM material is preserved in
-`backup/pre-bazzite-honor-overhaul-2026-10-10`.
+## What this Omarchy adaptation does
 
-## What it installs
+It installs only the fixes that have been observed or can be safely identified
+on this M1230:
 
-- byte-verified ACPI `I2C_DEVT` override;
-- `xe.enable_psr=1`;
-- HID-BPF mic-mute descriptor fix;
-- HID-BPF left-edge touchpad brightness gesture;
-- private patched SDCP libfprint for EgisTec `1c7a:05aa`;
-- M1230-only keyboard-backlight LED driver for KDE/UPower;
-- forced DSC through the Bazzite OGC kernel debugfs interface;
-- boot health check with `RESULT: OK/FAIL`.
+- byte-checked ACPI `I2C_DEVT` override for touchpad/touchscreen enumeration;
+- `xe.enable_psr=1` through an **Omarchy Limine drop-in**;
+- HID-BPF phantom mic-mute fix for the touchscreen;
+- HID-BPF left-edge brightness gesture for the touchpad;
+- private SDCP-capable libfprint for the EgisTec `1c7a:05aa` reader;
+- M1230-only keyboard-backlight LED driver (`honor::kbd_backlight`);
+- DSC force service for the internal OLED, avoiding a foreign `xe.ko`;
+- boot health check with a single `RESULT: OK/FAIL`.
 
-## Important design rule
+## What it deliberately does *not* do
 
-**No script in this repository installs RPM packages or performs a reboot.**
+- no `rpm-ostree` or Bazzite logic;
+- no direct edits to `/etc/default/limine`;
+- no custom `xe.ko` copied from or rebuilt against a vanilla kernel;
+- no blind reuse of M1010/M1050 EC offsets or Tier-B fixes;
+- no automatic reboot;
+- no `curl | bash`;
+- no Secure-Boot/lockdown bypass.
 
-All boot-affecting steps are explicit and manual:
+The old `cdclk-ptl` module patch is also not installed. Omarchy's current
+7.2.8-based kernel already contains the stable Panther Lake CDCLK sanitization
+fix, so carrying another `xe.ko` for it would add risk without adding a fix.
 
-1. you manually run the documented `rpm-ostree install` dependency transaction;
-2. you inspect `rpm-ostree status` and reboot yourself;
-3. you run `preflight.sh`, which only validates hardware/firmware and prepares
-   the pinned support source;
-4. you manually stage ACPI/initramfs/PSR commands from `docs/INSTALL.md`;
-5. you inspect `rpm-ostree status` and reboot yourself again;
-6. only then you run `install.sh`, which is strictly post-reboot/runtime setup;
-7. after it succeeds, you choose when to do the final persistence reboot.
+## Installation model
 
-`install.sh` contains **no `rpm-ostree` command and no reboot command**.
+The process has a hard reboot boundary:
 
-## Start here
+1. install host dependencies manually;
+2. run `preflight.sh`;
+3. run `stage-boot.sh`;
+4. reboot **yourself**;
+5. run `install.sh`;
+6. enroll the fingerprint and let Omarchy configure its own PAM/lock integration.
 
-Read [`docs/INSTALL.md`](docs/INSTALL.md) from top to bottom.
+Start with [`docs/INSTALL.md`](docs/INSTALL.md). Do not skip the preflight.
 
-The post-reboot runtime install command is:
-
-```bash
-sudo ./install.sh --yes
-```
-
-Do not enable Secure Boot for this tested setup: the local ACPI override and
-out-of-tree keyboard-backlight module are intentionally fail-closed when kernel
-lockdown is active.
-
-## Safety model
-
-The setup refuses to continue when DMI does not match M1230, Secure Boot or
-lockdown is active, required packages are missing, live ACPI bytes differ from
-the audited reference, the pinned support source changes, or a required
-post-reboot check fails.
-
-No `curl | bash`, no global SELinux disable, no `rpm-ostree reset`, no automatic
-package layering, no automatic reboot, no custom `xe.ko`, and no blind reuse of
-EC offsets from another board revision.
-
-See:
-
-- [`docs/INSTALL.md`](docs/INSTALL.md)
-- [`docs/AUDIT.md`](docs/AUDIT.md)
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/UPDATES.md`](docs/UPDATES.md)
-- [`docs/BIOS-UPDATE.md`](docs/BIOS-UPDATE.md)
-- [`docs/OFFICIAL-SOURCES.md`](docs/OFFICIAL-SOURCES.md)
+The scripts never reboot the laptop for you.

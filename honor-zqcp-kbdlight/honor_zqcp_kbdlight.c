@@ -9,7 +9,7 @@
  *   0x01 = latch current level
  *
  * Deliberately no periodic EC polling. Firmware Fn+Space remains independent;
- * KDE/UPower controls this LED class device directly.
+ * userspace can control this LED class device directly.
  */
 
 #include <linux/module.h>
@@ -170,4 +170,4 @@ module_exit(kbdlight_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Keyboard backlight LED driver for HONOR ZQC-P M1230");
-MODULE_AUTHOR("pluseight8 M1230 Bazzite setup");
+MODULE_AUTHOR("pluseight8 M1230 Omarchy setup");

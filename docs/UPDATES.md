@@ -1,50 +1,112 @@
-# Updates and rollback
+# Omarchy updates and rollback
 
-Bazzite Desktop images update automatically. The setup is designed to survive a
-normal image deployment change.
+## Normal update path
 
-## Expected to persist
+Update Omarchy normally:
 
-- files under `/etc` and `/var`;
-- the ACPI override configuration;
-- `xe.enable_psr=1` kernel argument;
-- HID-BPF objects and micmute re-apply service;
-- private fingerprint library under `/opt`;
-- DSC service/helper;
-- keyboard-backlight source/helper;
-- boot health check.
+```bash
+omarchy-update
+```
 
-The keyboard-backlight `.ko` is kernel-release-specific. Its service compares
-`vermagic` with the running kernel and recompiles when needed using Bazzite's
-matching kernel-devel tree.
-
-## After an update
-
-Wait roughly one minute after boot, then:
+If a new kernel was installed, reboot normally. About one minute after login:
 
 ```bash
 cat /var/lib/honor/health-last.txt
 ```
 
-If it says `RESULT: OK`, do nothing.
+If the final line is:
 
-## If an update breaks the machine
-
-Bazzite documents rollback through the boot menu or rpm-ostree. If the current
-system still boots:
-
-```bash
-sudo rpm-ostree rollback
-systemctl reboot
+```text
+RESULT: OK
 ```
 
-The install guide has you pin the known-good deployment manually before staging
-the ACPI/PSR boot changes, so the recovery point remains an explicit user action.
+there is nothing to redo.
 
-## BIOS updates
+## What survives an update
 
-Treat BIOS updates separately from Bazzite updates. This setup intentionally
-checks exact ACPI bytes because firmware can change tables and EC behavior. Do
-not assume a new BIOS is compatible with the old ACPI override merely because
-the model name is unchanged. Follow `docs/BIOS-UPDATE.md`; all boot-affecting
-steps there are manual.
+These live outside package-owned configuration and should persist:
+
+- `/etc/initcpio/acpi_override/SSDT27_TPD0.aml`;
+- `/etc/mkinitcpio.conf.d/90-honor-m1230-acpi.conf`;
+- `/etc/limine-entry-tool.d/90-honor-m1230.conf`;
+- HID-BPF objects under `/etc/udev-hid-bpf`;
+- the private SDCP libfprint under `/opt/honor-libfprint-sdcp`;
+- systemd units and helpers under `/etc/systemd/system` and `/usr/local/lib/honor`;
+- keyboard-backlight source under `/var/lib/honor/kbdlight-src`.
+
+The keyboard module itself is tied to one kernel release, but the service checks
+the running kernel on every boot and rebuilds the module from the matching
+headers when its vermagic changes.
+
+## If headers and kernel temporarily disagree
+
+Check:
+
+```bash
+uname -r
+cat /usr/lib/modules/"$(uname -r)"/pkgbase
+test -e /usr/lib/modules/"$(uname -r)"/build/Makefile && echo OK
+```
+
+If the headers for the **running** kernel are missing, do not force a build.
+Install the matching package or boot the kernel that matches the installed
+headers.
+
+For the default Omarchy kernel:
+
+```bash
+sudo pacman -S --needed linux-omarchy-headers
+```
+
+## Why no automatic `xe.ko` rebuild hook exists
+
+This repository deliberately does not overlay Omarchy's Xe driver. The current
+stable kernel already contains the PTL CDCLK fix, and DSC is enabled using the
+existing debugfs interface.
+
+That means a normal kernel update does not need a locally rebuilt display
+module.
+
+## Updating this repository
+
+The HONOR hardware source dependency is pinned. Pulling a new version of
+`pluseight8/my-dotfiles` does not silently move that pin unless the repository
+itself was audited and changed.
+
+Update the checkout with:
+
+```bash
+cd /var/opt/pluseight8-my-dotfiles
+git pull --ff-only
+```
+
+Then read the commit diff before rerunning the installer.
+
+## If a new kernel breaks a fix
+
+Collect:
+
+```bash
+cat /var/lib/honor/health-last.txt
+uname -r
+cat /usr/lib/modules/"$(uname -r)"/pkgbase
+sudo journalctl -k -b --no-pager > /tmp/honor-kernel.log
+```
+
+For a display regression also collect:
+
+```bash
+sudo cat /sys/kernel/debug/dri/*/eDP-*/i915_dsc_fec_support
+sudo grep -m1 -E 'pipe src=.*bpp=' \
+  /sys/kernel/debug/dri/*/i915_display_info
+```
+
+Do not copy a kernel module from an older kernel into the new one.
+
+## Omarchy snapshots / rollback
+
+Use Omarchy's own snapshot/rollback workflow for system rollback. This
+repository does not create its own competing rollback system.
+
+After rolling back to another kernel, the keyboard-backlight service rebuilds
+for the kernel that is actually running. Run the health check again.

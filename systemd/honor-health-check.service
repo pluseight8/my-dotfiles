@@ -1,6 +1,6 @@
 [Unit]
 Description=HONOR ZQC-P M1230 health check
-After=display-manager.service honor-force-dsc.service honor-hid-bpf-reapply.service honor-zqcp-kbdlight.service
+After=honor-force-dsc.service honor-hid-bpf-reapply.service honor-zqcp-kbdlight.service
 
 [Service]
 Type=oneshot
