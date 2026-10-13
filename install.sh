@@ -32,7 +32,7 @@ assert_lockdown_off
 assert_host_dependencies_present
 assert_matching_headers
 assert_hid_bpf_kernel_support
-require_cmds git python3 systemctl md5sum install find awk grep lsusb ldconfig journalctl
+require_cmds git python3 systemctl md5sum install find awk grep lsusb ldconfig journalctl runuser jq
 
 [[ -d "$HONOR_UPSTREAM_DIR/.git" ]] \
     || die "prepared HONOR source missing; run preflight.sh and stage-boot.sh first"
@@ -150,10 +150,27 @@ install -m755 "$ROOT/scripts/dsc-modeset-user.sh" /usr/local/lib/honor/dsc-modes
 install -m644 "$ROOT/systemd/honor-dsc-modeset.service" /etc/systemd/user/honor-dsc-modeset.service
 
 USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+USER_UID="$(id -u "$TARGET_USER")"
 USER_GROUP="$(id -gn "$TARGET_USER")"
+[[ -n "$USER_HOME" && -d "$USER_HOME" ]] || die "cannot resolve home for $TARGET_USER"
 install -d -m755 -o "$TARGET_USER" -g "$USER_GROUP" "$USER_HOME/.config/systemd/user/graphical-session.target.wants"
 ln -sfn /etc/systemd/user/honor-dsc-modeset.service     "$USER_HOME/.config/systemd/user/graphical-session.target.wants/honor-dsc-modeset.service"
 chown -h "$TARGET_USER:$USER_GROUP"     "$USER_HOME/.config/systemd/user/graphical-session.target.wants/honor-dsc-modeset.service"
+
+ALLOW_PENDING_DSC=1
+if [[ -S "/run/user/$USER_UID/bus" ]]; then
+    USER_SYSTEMCTL=(runuser -u "$TARGET_USER" -- env         XDG_RUNTIME_DIR="/run/user/$USER_UID"         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_UID/bus"         systemctl --user)
+    "${USER_SYSTEMCTL[@]}" daemon-reload
+    if "${USER_SYSTEMCTL[@]}" restart honor-dsc-modeset.service; then
+        sleep 2
+        ALLOW_PENDING_DSC=0
+        log "post-login DSC modeset helper completed in the current session"
+    else
+        warn "live DSC modeset helper could not run; it is enabled for the next graphical login"
+    fi
+else
+    warn "user D-Bus is not available; DSC modeset helper is enabled for the next graphical login"
+fi
 
 log "installing boot health check"
 install -m755 "$ROOT/scripts/health-check.sh" /usr/local/lib/honor/health-check.sh
@@ -163,7 +180,10 @@ systemctl daemon-reload
 systemctl enable --now honor-health-check.timer >/dev/null
 
 log "running the health check now"
-if ! HONOR_USER="$TARGET_USER" /usr/local/lib/honor/health-check.sh; then
+if ! HONOR_ALLOW_PENDING_DSC="$ALLOW_PENDING_DSC" \
+    HONOR_USER="$TARGET_USER" \
+    HONOR_ACPI_PATCHED_MD5="$HONOR_ACPI_PATCHED_MD5" \
+    /usr/local/lib/honor/health-check.sh; then
     die "health check failed; see /var/lib/honor/health-last.txt"
 fi
 
