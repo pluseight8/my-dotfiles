@@ -1,0 +1,12 @@
+[Unit]
+Description=Trigger HONOR eDP modeset after graphical login
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/honor/dsc-modeset-user.sh
+
+[Install]
+WantedBy=graphical-session.target
