@@ -6,9 +6,11 @@ mkdir -p /var/lib/honor
 exec > >(tee "$LOG") 2>&1
 
 FAIL=0
-ok()   { echo "[ OK ] $*"; }
-warn() { echo "[WARN] $*"; }
-bad()  { echo "[FAIL] $*"; FAIL=1; }
+PENDING=0
+ok()      { echo "[ OK ] $*"; }
+warn()    { echo "[WARN] $*"; }
+pending() { echo "[PENDING] $*"; PENDING=1; }
+bad()     { echo "[FAIL] $*"; FAIL=1; }
 
 USER_NAME="${HONOR_USER:-}"
 
@@ -120,6 +122,24 @@ mountpoint -q /sys/kernel/debug \
 DSC_FILE="$(find /sys/kernel/debug/dri \
     -path '*/eDP-*/i915_dsc_fec_support' \
     -print -quit 2>/dev/null || true)"
+
+try_user_dsc_modeset() {
+    local user uid runtime bus
+    user="$USER_NAME"
+    [[ -n "$user" ]] || return 1
+    uid="$(id -u "$user" 2>/dev/null || true)"
+    [[ -n "$uid" ]] || return 1
+
+    runtime="/run/user/$uid"
+    bus="$runtime/bus"
+    [[ -S "$bus" ]] || return 1
+
+    runuser -u "$user" -- env \
+        XDG_RUNTIME_DIR="$runtime" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+        systemctl --user start honor-dsc-modeset.service >/dev/null 2>&1
+}
+
 if [[ -n "$DSC_FILE" ]]; then
     DSC="$(cat "$DSC_FILE" 2>/dev/null || true)"
     grep -q 'DSC_Sink_Support: yes' <<<"$DSC" \
@@ -128,14 +148,24 @@ if [[ -n "$DSC_FILE" ]]; then
     grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
         && ok "DSC force enabled" \
         || bad "DSC force not enabled"
+
+    if ! grep -q 'DSC_Enabled: yes' <<<"$DSC" \
+       && grep -q 'Force_DSC_Enable: yes' <<<"$DSC"; then
+        if try_user_dsc_modeset; then
+            sleep 1
+            DSC="$(cat "$DSC_FILE" 2>/dev/null || true)"
+        fi
+    fi
+
     if grep -q 'DSC_Enabled: yes' <<<"$DSC"; then
         ok "DSC active"
     elif grep -q 'Force_DSC_Enable: yes' <<<"$DSC"; then
-        warn "DSC force is armed but not active yet; a new display modeset/reboot is required"
+        pending "DSC force is armed; waiting for the graphical user session/modeset"
     else
         bad "DSC is neither active nor armed"
     fi
 else
+    DSC=""
     bad "i915_dsc_fec_support missing"
 fi
 
@@ -150,7 +180,7 @@ if [[ -n "$DISPLAY_INFO" ]]; then
     elif [[ -n "$PIPE" ]] && [[ -n "${DSC:-}" ]] \
          && grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
          && ! grep -q 'DSC_Enabled: yes' <<<"$DSC"; then
-        warn "display modeset is still pending after DSC force: $PIPE"
+        pending "display modeset is still pending after DSC force: $PIPE"
     elif [[ -n "$PIPE" ]]; then
         bad "display state: $PIPE"
     else
@@ -192,4 +222,14 @@ if (( FAIL )); then
     exit 1
 fi
 
+if (( PENDING )); then
+    echo "RESULT: PENDING"
+    exit 0
+fi
+
 echo "RESULT: OK"
+
+# The boot timer retries while a graphical login has not happened yet. Once the
+# machine reaches a fully healthy state there is no reason to keep polling for
+# the remainder of this boot.
+systemctl stop honor-health-check.timer >/dev/null 2>&1 || true
