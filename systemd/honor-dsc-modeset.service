@@ -1,8 +1,8 @@
 [Unit]
-Description=Trigger HONOR eDP modeset after graphical login
-After=graphical-session.target
+Description=Trigger HONOR eDP modeset once Omarchy's Wayland session is ready
+After=dbus.socket wayland-session-waitenv.service
+Requires=dbus.socket
 PartOf=graphical-session.target
-ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=oneshot
