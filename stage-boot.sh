@@ -84,7 +84,11 @@ for image in \
     "$esp/$machine_id/$kernel_name/initramfs" \
     "$esp/EFI/Linux/$kernel_name.efi"; do
     [[ -r "$image" ]] || continue
-    if lsinitcpio "$image" 2>/dev/null | grep -q 'kernel/firmware/acpi/SSDT27_TPD0.aml'; then
+    # Do not use grep -q here: with set -o pipefail, grep can exit as soon as
+    # it finds the AML and make lsinitcpio die on SIGPIPE, turning a real match
+    # into a false negative.
+    if lsinitcpio --early "$image" 2>/dev/null \
+        | grep -F 'kernel/firmware/acpi/SSDT27_TPD0.aml' >/dev/null; then
         log "verified ACPI override inside boot image: $image"
         image_ok=1
         break
