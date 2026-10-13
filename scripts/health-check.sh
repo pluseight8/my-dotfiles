@@ -28,12 +28,33 @@ PKGBASE="$(cat "/usr/lib/modules/$(uname -r)/pkgbase" 2>/dev/null || true)"
     || bad "unexpected kernel pkgbase: ${PKGBASE:-missing}"
 
 KLOG="$(journalctl -k -b --no-pager 2>/dev/null || true)"
+
+find_live_i2c_devt() {
+    local f oem
+    for f in /sys/firmware/acpi/tables/SSDT*; do
+        [[ -e "$f" ]] || continue
+        oem="$(dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\\0 ' || true)"
+        if [[ "$oem" == I2C_DEVT ]]; then
+            printf '%s\\n' "$f"
+            return 0
+        fi
+    done
+    return 1
+}
+
+LIVE_I2C="$(find_live_i2c_devt 2>/dev/null || true)"
+LIVE_I2C_HASH=""
+[[ -n "$LIVE_I2C" ]] && LIVE_I2C_HASH="$(md5sum "$LIVE_I2C" | awk '{print $1}')"
+
 if grep -qE 'AE_AML_INTERNAL.*I2C_DEVT|I2C_DEVT.*AE_AML_INTERNAL' <<<"$KLOG"; then
     bad "ACPI I2C_DEVT returned AE_AML_INTERNAL"
-elif grep -qiE 'Table Upgrade:.*I2C_DEVT|ACPI:.*I2C_DEVT.*override' <<<"$KLOG"; then
-    ok "ACPI I2C_DEVT override active"
+elif [[ -n "\${HONOR_ACPI_PATCHED_MD5:-}" && "$LIVE_I2C_HASH" == "$HONOR_ACPI_PATCHED_MD5" ]]; then
+    ok "ACPI I2C_DEVT live hash matches the audited patched table"
+    if ! grep -qiE 'Table Upgrade:.*I2C_DEVT|ACPI:.*I2C_DEVT.*override' <<<"$KLOG"; then
+        warn "kernel log did not use the expected override wording"
+    fi
 else
-    bad "ACPI I2C_DEVT override not confirmed"
+    bad "ACPI I2C_DEVT live hash is \${LIVE_I2C_HASH:-missing}; expected \${HONOR_ACPI_PATCHED_MD5:-unset}"
 fi
 
 if grep -q 'CPU pipe .* FIFO underrun' <<<"$KLOG"; then
