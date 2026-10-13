@@ -145,6 +145,10 @@ if [[ -n "$DISPLAY_INFO" ]]; then
     PIPE="$(grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO" 2>/dev/null || true)"
     if grep -q 'bpp=30' <<<"$PIPE" && grep -q 'dither=no' <<<"$PIPE"; then
         ok "display: bpp=30, dither=no"
+    elif [[ -n "$PIPE" ]] && [[ -n "${DSC:-}" ]] \
+         && grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
+         && ! grep -q 'DSC_Enabled: yes' <<<"$DSC"; then
+        warn "display modeset is still pending after DSC force: $PIPE"
     elif [[ -n "$PIPE" ]]; then
         bad "display state: $PIPE"
     else
