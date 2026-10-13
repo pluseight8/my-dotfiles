@@ -145,16 +145,12 @@ if [[ -n "$DISPLAY_INFO" ]]; then
     PIPE="$(grep -m1 -E 'pipe src=.*bpp=' "$DISPLAY_INFO" 2>/dev/null || true)"
     if grep -q 'bpp=30' <<<"$PIPE" && grep -q 'dither=no' <<<"$PIPE"; then
         ok "display: bpp=30 (10 bpc), dither=no"
+    elif [[ -n "$PIPE" ]] && grep -q 'bpp=24' <<<"$PIPE" && grep -q 'dither=no' <<<"$PIPE"; then
+        ok "display: bpp=24 (8 bpc), dither=no on stock Omarchy kernel"
     elif [[ -n "$PIPE" ]] && [[ -n "${DSC:-}" ]] \
          && grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
          && ! grep -q 'DSC_Enabled: yes' <<<"$DSC"; then
         warn "display modeset is still pending after DSC force: $PIPE"
-    elif [[ -n "$PIPE" ]] && grep -q 'bpp=24' <<<"$PIPE" && grep -q 'dither=no' <<<"$PIPE"; then
-        if [[ "${HONOR_ALLOW_PENDING_DSC:-0}" == 1 ]]; then
-            warn "DSC is active at bpp=24 (8 bpc); 10 bpc force is armed and requires the next reboot/modeset: $PIPE"
-        else
-            bad "DSC is active but only at bpp=24 (8 bpc); M1230 OLED target is bpp=30 (10 bpc): $PIPE"
-        fi
     elif [[ -n "$PIPE" ]]; then
         bad "display state: $PIPE"
     else
