@@ -48,13 +48,13 @@ LIVE_I2C_HASH=""
 
 if grep -qE 'AE_AML_INTERNAL.*I2C_DEVT|I2C_DEVT.*AE_AML_INTERNAL' <<<"$KLOG"; then
     bad "ACPI I2C_DEVT returned AE_AML_INTERNAL"
-elif [[ -n "\${HONOR_ACPI_PATCHED_MD5:-}" && "$LIVE_I2C_HASH" == "$HONOR_ACPI_PATCHED_MD5" ]]; then
+elif [[ -n "${HONOR_ACPI_PATCHED_MD5:-}" && "$LIVE_I2C_HASH" == "$HONOR_ACPI_PATCHED_MD5" ]]; then
     ok "ACPI I2C_DEVT live hash matches the audited patched table"
     if ! grep -qiE 'Table Upgrade:.*I2C_DEVT|ACPI:.*I2C_DEVT.*override' <<<"$KLOG"; then
         warn "kernel log did not use the expected override wording"
     fi
 else
-    bad "ACPI I2C_DEVT live hash is \${LIVE_I2C_HASH:-missing}; expected \${HONOR_ACPI_PATCHED_MD5:-unset}"
+    bad "ACPI I2C_DEVT live hash is ${LIVE_I2C_HASH:-missing}; expected ${HONOR_ACPI_PATCHED_MD5:-unset}"
 fi
 
 if grep -q 'CPU pipe .* FIFO underrun' <<<"$KLOG"; then
