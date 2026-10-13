@@ -52,6 +52,7 @@ flock -n 9 || die "another HONOR M1230 installation is already running"
 
 cat > /etc/honor-m1230.conf <<EOF
 HONOR_USER=$TARGET_USER
+HONOR_ACPI_PATCHED_MD5=$HONOR_ACPI_PATCHED_MD5
 EOF
 chmod 644 /etc/honor-m1230.conf
 
@@ -61,16 +62,23 @@ verify_boot_stage() {
     local klog live_hash psr
     klog="$(journalctl -k -b --no-pager 2>/dev/null || true)"
 
-    grep -qiE 'Table Upgrade:.*I2C_DEVT|ACPI:.*I2C_DEVT.*override' <<<"$klog" \
-        || die "the I2C_DEVT ACPI override is not confirmed in this boot; rerun stage-boot.sh and reboot"
+    # The live ACPI table bytes are the authoritative proof. Kernel log wording
+    # changes between kernel releases, so a missing informational message must
+    # not turn a successfully loaded override into a false negative.
+    live_hash="$(current_i2c_hash)" || die "live I2C_DEVT not found"
+    [[ "$live_hash" == "$HONOR_ACPI_PATCHED_MD5" ]] \
+        || die "current I2C_DEVT is not the audited patched table: $live_hash. Run stage-boot.sh, reboot, then retry."
+
     ! grep -qE 'AE_AML_INTERNAL.*I2C_DEVT|I2C_DEVT.*AE_AML_INTERNAL' <<<"$klog" \
         || die "I2C_DEVT returned AE_AML_INTERNAL after the override"
     ! grep -qi 'locked down.*table override' <<<"$klog" \
         || die "kernel lockdown rejected the ACPI override"
 
-    live_hash="$(current_i2c_hash)" || die "live I2C_DEVT not found"
-    [[ "$live_hash" == "$HONOR_ACPI_PATCHED_MD5" ]] \
-        || die "current I2C_DEVT is not the audited patched table: $live_hash"
+    if grep -qiE 'Table Upgrade:.*I2C_DEVT|ACPI:.*I2C_DEVT.*override' <<<"$klog"; then
+        log "kernel log also confirms the I2C_DEVT override"
+    else
+        warn "kernel log did not use the expected override wording; live I2C_DEVT hash is authoritative and matches"
+    fi
 
     compgen -G '/sys/bus/hid/devices/*2808:5662*' >/dev/null \
         || die "touchscreen 2808:5662 is missing after the ACPI override"
