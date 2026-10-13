@@ -132,5 +132,9 @@ A healthy machine ends with:
 RESULT: OK
 ```
 
+A boot-time `RESULT: PENDING` is transient: the checker may have run before
+the graphical login. It retries automatically and self-heals the DSC modeset
+once the user session becomes available.
+
 See [docs/UPDATES.md](docs/UPDATES.md) for the persistence model and recovery
 steps.
