@@ -38,8 +38,8 @@ systemctl daemon-reload
 systemctl enable --now honor-health-check.timer >/dev/null
 
 log "running health check"
-if ! HONOR_USER="$HONOR_USER" HONOR_ACPI_PATCHED_MD5="$HONOR_ACPI_PATCHED_MD5"     /usr/local/lib/honor/health-check.sh; then
-    die "health check failed; see /var/lib/honor/health-last.txt"
+if ! HONOR_ALLOW_PENDING_DSC=1 HONOR_USER="$HONOR_USER" HONOR_ACPI_PATCHED_MD5="$HONOR_ACPI_PATCHED_MD5"     /usr/local/lib/honor/health-check.sh; then
+    die "health check failed outside the expected pre-reboot DSC transition; see /var/lib/honor/health-last.txt"
 fi
 
 printf 'installed=%s\nkernel=%s\nuser=%s\nomarchy=%s\n'     "$(date --iso-8601=seconds)" "$(uname -r)" "$HONOR_USER" "$(omarchy-version)"     > "$HONOR_STATE_DIR/runtime-install-complete"
