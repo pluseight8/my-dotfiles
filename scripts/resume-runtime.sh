@@ -43,10 +43,15 @@ ln -sfn /etc/systemd/user/honor-dsc-modeset.service     "$USER_HOME/.config/syst
 chown -h "$HONOR_USER:$USER_GROUP"     "$USER_HOME/.config/systemd/user/graphical-session.target.wants/honor-dsc-modeset.service"
 
 USER_SYSTEMCTL=(runuser -u "$HONOR_USER" -- env     XDG_RUNTIME_DIR="/run/user/$USER_UID"     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_UID/bus"     systemctl --user)
+ALLOW_PENDING_DSC=1
 if [[ -S "/run/user/$USER_UID/bus" ]]; then
     "${USER_SYSTEMCTL[@]}" daemon-reload
-    "${USER_SYSTEMCTL[@]}" restart honor-dsc-modeset.service || true
-    sleep 2
+    if "${USER_SYSTEMCTL[@]}" restart honor-dsc-modeset.service; then
+        sleep 2
+        ALLOW_PENDING_DSC=0
+    else
+        warn "live DSC modeset helper could not run; it will retry automatically on the next graphical login"
+    fi
 fi
 
 log "installing health-check timer"
