@@ -169,6 +169,10 @@ The audit checks, among other things:
 - initialized pending-DSC state;
 - UWSM-aware user service ordering;
 - Hyprland signature recovery and real DPMS-state verification;
+- retry/self-heal logic for the race where the boot health check runs before
+  graphical login;
+- `RESULT: PENDING` for that transient state instead of a misleading
+  `RESULT: OK`;
 - acceptance of the stock-kernel `bpp=24, dither=no` state;
 - dynamic ISO UUID probing in the GRUB recovery guide;
 - absence of the historical hard-coded ISO UUID.
