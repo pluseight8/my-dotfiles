@@ -29,14 +29,14 @@ on this M1230:
 - HID-BPF left-edge brightness gesture for the touchpad;
 - private SDCP-capable libfprint for the EgisTec `1c7a:05aa` reader;
 - M1230-only keyboard-backlight LED driver (`honor::kbd_backlight`);
-- DSC force service for the internal OLED, avoiding a foreign `xe.ko`;
+- DSC force service for the internal OLED, while keeping Omarchy's stock kernel and `xe.ko`;
 - boot health check with a single `RESULT: OK/FAIL`.
 
 ## What it deliberately does *not* do
 
 - no `rpm-ostree` or Bazzite logic;
 - no direct edits to `/etc/default/limine`;
-- no custom `xe.ko` copied from or rebuilt against a vanilla kernel;
+- no custom kernel and no custom `xe.ko`;
 - no blind reuse of M1010/M1050 EC offsets or Tier-B fixes;
 - no automatic reboot;
 - no `curl | bash`;
@@ -60,3 +60,15 @@ The process has a hard reboot boundary:
 Start with [`docs/INSTALL.md`](docs/INSTALL.md). Do not skip the preflight.
 
 The scripts never reboot the laptop for you.
+
+
+## Kernel policy
+
+This adaptation intentionally stays on the **official Omarchy kernel package**.
+It does not build or install a locally patched `linux-omarchy`.
+
+On the current stock kernel the internal panel is considered healthy when DSC
+is active with `dither=no`. The observed stock-kernel mode is `bpp=24`
+(8 bpc). Reaching `bpp=30` (10 bpc) currently requires a kernel-side eDP DSC
+preference patch, which this repository deliberately does **not** install so
+normal Omarchy kernel updates remain untouched.
