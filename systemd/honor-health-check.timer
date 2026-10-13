@@ -1,9 +1,10 @@
 [Unit]
-Description=Run HONOR M1230 health check after boot
+Description=Run HONOR M1230 health check until the graphical session is healthy
 
 [Timer]
-OnBootSec=45s
-AccuracySec=5s
+OnBootSec=20s
+OnUnitInactiveSec=30s
+AccuracySec=3s
 Unit=honor-health-check.service
 
 [Install]
