@@ -72,3 +72,10 @@ is active with `dither=no`. The observed stock-kernel mode is `bpp=24`
 (8 bpc). Reaching `bpp=30` (10 bpc) currently requires a kernel-side eDP DSC
 preference patch, which this repository deliberately does **not** install so
 normal Omarchy kernel updates remain untouched.
+
+
+### Stock-kernel DSC activation
+
+A per-user `honor-dsc-modeset.service` runs after Omarchy's graphical session
+starts and triggers one brief DPMS cycle on the internal eDP panel. This applies
+the already-armed DSC setting while preserving the official Omarchy kernel.
