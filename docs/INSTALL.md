@@ -345,11 +345,23 @@ Omarchy then owns the sudo/polkit/lock-screen integration.
 cat /var/lib/honor/health-last.txt
 ```
 
-The final line must be:
+After a full graphical login the final line must be:
 
 ```text
 RESULT: OK
 ```
+
+If the boot-time checker runs before the graphical user session exists, it now
+reports:
+
+```text
+RESULT: PENDING
+```
+
+rather than pretending the boot is fully healthy. The systemd timer retries
+every 30 seconds; once the user session is available the health check can start
+the DSC modeset helper itself, rewrite `health-last.txt` with the final state,
+and stop polling for the rest of that boot.
 
 A healthy post-reboot display section should include:
 
