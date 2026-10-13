@@ -48,11 +48,11 @@ sleep 1
 
 panel_on=0
 for _ in $(seq 1 50); do
-    if ! hyprctl dispatch dpms on "$monitor" >/dev/null 2>&1; then
-        recover_signature || true
-        sleep 0.2
-        continue
-    fi
+    # Hyprctl can transiently return 7/NOTRUNNING during the DPMS transition
+    # even when the command is actually accepted. Always verify compositor
+    # state independently instead of trusting that transient exit status.
+    hyprctl dispatch dpms on "$monitor" >/dev/null 2>&1 || true
+    recover_signature || true
 
     json="$(hyprctl monitors -j 2>/dev/null || true)"
     if jq -e --arg mon "$monitor" '.[] | select(.name == $mon and .dpmsStatus == true)' <<<"$json" >/dev/null 2>&1; then
