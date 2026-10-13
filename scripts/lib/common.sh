@@ -30,9 +30,15 @@ read_dmi() {
 assert_omarchy() {
     require_cmds pacman omarchy-version limine-mkinitcpio
     [[ -r /etc/os-release ]] || die "/etc/os-release missing"
-    local id
+
+    local id id_like
     id="$(. /etc/os-release; printf '%s' "${ID:-}")"
-    [[ "$id" == arch ]] || die "this adaptation is for Omarchy/Arch; /etc/os-release ID=$id"
+    id_like="$(. /etc/os-release; printf '%s' "${ID_LIKE:-}")"
+
+    if [[ "$id" != omarchy && "$id" != arch && " $id_like " != *" arch "* ]]; then
+        die "this adaptation is for Omarchy/Arch; /etc/os-release ID=$id ID_LIKE=${id_like:-unset}"
+    fi
+
     pacman -Q omarchy >/dev/null 2>&1 \
         || die "the Omarchy package is not installed"
 }
