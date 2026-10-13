@@ -1,6 +1,7 @@
 # Sources reviewed for the Omarchy adaptation
 
-Reviewed on 2026-10-12.
+Reviewed on 2026-10-13 after completing a full install/reboot cycle on the
+target M1230.
 
 ## Omarchy
 
@@ -8,17 +9,16 @@ Primary source:
 
 - https://github.com/omacom/omarchy
 - reviewed revision:
-  `4c1b4cb3a94447aff39af98e2fcc0490a9fb32e7`
+  `492b8837deea69663c7a5418871f07ed075a9686`
 
-Relevant interfaces verified there:
+Relevant interfaces/behavior checked there:
 
-- `/etc/limine-entry-tool.d/*.conf` with
-  `KERNEL_CMDLINE[default]+=" ..."` for hardware kernel parameters;
-- `/etc/mkinitcpio.conf.d/*.conf` with `HOOKS+=(...)`;
-- `limine-mkinitcpio` as Omarchy's boot-image rebuild path;
-- `linux-omarchy` and `linux-omarchy-headers` in the installed package set;
-- `omarchy-setup-security-fingerprint` as the owner of Omarchy PAM/polkit/lock
-  integration.
+- `/etc/limine-entry-tool.d/*.conf`;
+- `limine-mkinitcpio`;
+- Omarchy's UWSM/systemd user-session model;
+- `wayland-session-waitenv.service`;
+- Hyprland session environment handling;
+- `omarchy-setup-security-fingerprint`.
 
 ## Omarchy package repository
 
@@ -26,24 +26,42 @@ Primary source:
 
 - https://github.com/omacom/omarchy-pkgs
 - reviewed revision:
-  `4192ecffd0c5500fd67e1a2db15dafa945655a03`
+  `e499d021c69d27e0750f77f9af7cd68534c8016f`
 
-The reviewed `linux-omarchy` meta package points at `linux-omarchy-bore`; the
-reviewed kernel package is based on Linux `7.2.8`.
+This repository intentionally consumes the official `linux-omarchy` package
+instead of producing a local replacement.
 
-## Arch mkinitcpio
+## Omarchy ISO
 
 Primary source:
 
-- https://github.com/archlinux/mkinitcpio
+- https://github.com/omacom/omarchy-iso
+- branch: `quattro`
+- reviewed revision:
+  `53b80d406cdcb56cd757562e0f31d2c13cb57f47`
 
-Current upstream includes the `acpi_override` install hook. That hook calls
-`add_file_early()` for AML files under `/etc/initcpio/acpi_override`, placing
-them in the early uncompressed CPIO required by Linux ACPI table override.
+The official x86_64 GRUB entry at that revision uses:
+
+```text
+/arch/boot/x86_64/vmlinuz-linux-t2
+/arch/boot/x86_64/initramfs-linux-t2.img
+archisobasedir=arch
+archisosearchuuid=<ISO UUID>
+quiet splash
+xe.enable_panel_replay=0
+initramfs_async=0
+```
+
+The target M1230 required only the temporary live-USB additions documented in
+[OMARCHY-USB-BOOT.md](OMARCHY-USB-BOOT.md):
+
+```text
+nomodeset module_blacklist=xe
+```
 
 ## HONOR hardware research / implementation
 
-Primary project used by this repository:
+Primary project:
 
 - https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010
 - pinned commit:
@@ -51,25 +69,48 @@ Primary project used by this repository:
 - pinned Git tree:
   `22f982f1a762dc076c00e287ef69e265cc8a69da`
 
-This source provides the audited ZQC-P ACPI table, HID-BPF implementations and
-the EgisTec SDCP libfprint recipe. M1230 is added locally at `status=probed`;
-the upstream M1010/M1050 `verified` status is never copied to it.
+This source provides:
 
-## Linux stable source
+- audited ZQC-P ACPI bytes;
+- the early-CPIO `acpi_override.install` hook;
+- HID-BPF implementations;
+- the EgisTec SDCP libfprint recipe.
 
-Primary stable tree:
+The pinned ACPI hook explicitly copies AML files from:
 
-- https://github.com/gregkh/linux
-- checked at tag `v7.2.8`
+```text
+/usr/lib/firmware/acpi/
+```
 
-`drivers/gpu/drm/i915/display/intel_cdclk.c` at that tag already contains the
-Panther Lake guard around the CD2X pipe-field sanitization
-(`DISPLAY_VER(display) < 30`). This is why the Omarchy adaptation does not
-install the older local `cdclk-ptl` `xe.ko` patch.
+into the early uncompressed CPIO at:
+
+```text
+/kernel/firmware/acpi/
+```
+
+using `add_file_early()`.
+
+M1230 is added locally as `status=probed`; M1010/M1050 `verified` status is
+not copied onto it.
+
+## Linux / Intel display behavior
+
+The repository does not carry a custom Xe module or custom Omarchy kernel.
+
+Display correctness is validated on the running packaged kernel instead:
+
+- no FIFO underrun in the current boot;
+- DSC sink support present;
+- `Force_DSC_Enable: yes`;
+- `DSC_Enabled: yes` after the compositor modeset;
+- `dither=no`.
+
+The accepted stock-kernel depth on the target is `bpp=24` (8 bpc).
 
 ## Design rule
 
-Claims about Omarchy behavior are based on Omarchy/Omarchy-pkgs sources.
-HONOR-specific behavior is based on the pinned hardware project plus the exact
-M1230 observations encoded in this repository. The two are not treated as
-interchangeable sources.
+Omarchy behavior is derived from Omarchy/Omarchy-ISO/Omarchy-pkgs sources.
+HONOR-specific behavior comes from the pinned HONOR source plus observations
+that are explicitly encoded as health checks.
+
+The repository prefers runtime verification over version-number assumptions.
