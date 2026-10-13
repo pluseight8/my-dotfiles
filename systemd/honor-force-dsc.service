@@ -1,6 +1,7 @@
 [Unit]
-Description=Force DSC on HONOR ZQC-P M1230 internal eDP panel
-After=systemd-user-sessions.service
+Description=Arm DSC on HONOR ZQC-P M1230 internal eDP panel before user sessions
+After=systemd-modules-load.service local-fs.target
+Before=systemd-user-sessions.service graphical.target
 ConditionPathExists=/sys/class/dmi/id/board_version
 
 [Service]
