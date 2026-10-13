@@ -108,6 +108,7 @@ REQUIRED_HOST_PACKAGES=(
     bpf
     udev-hid-bpf
     curl
+    jq
     usbutils
     fprintd
     meson
