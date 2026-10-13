@@ -29,18 +29,8 @@ grep -q 'DSC_Sink_Support: yes' "$DSC_FILE" || {
     exit 1
 }
 
-# Force the panel's advertised 10 bpc as the DSC input depth before enabling
-# compression. Without this, the generic force-DSC path can inherit the
-# reduced 8 bpc baseline and come up at bpp=24 even though this OLED advertises
-# 10 bpc. The connector-local debugfs knob is provided by the Intel display
-# driver specifically for forcing DSC input BPC.
-DSC_BPC_FILE="$(dirname "$DSC_FILE")/i915_dsc_bpc"
-[[ -w "$DSC_BPC_FILE" ]] || {
-    echo "HONOR: i915_dsc_bpc control is missing or not writable: $DSC_BPC_FILE" >&2
-    exit 1
-}
-
-echo 10 > "$DSC_BPC_FILE"
+# Keep the stock Omarchy kernel intact. We only ask the existing Intel
+# display driver to enable DSC; we do not patch or replace the kernel/xe.ko.
 echo 1 > "$DSC_FILE"
 
 for _ in $(seq 1 50); do
