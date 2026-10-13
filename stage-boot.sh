@@ -12,7 +12,7 @@ assert_omarchy_kernel
 assert_lockdown_off
 assert_host_dependencies_present
 assert_matching_headers
-require_cmds limine-mkinitcpio install grep sed md5sum
+require_cmds limine-mkinitcpio lsinitcpio install grep sed md5sum
 
 [[ -d "$HONOR_UPSTREAM_DIR/.git" ]] \
     || die "prepared HONOR source missing; run sudo ./preflight.sh --yes first"
@@ -22,24 +22,30 @@ grep -q '^\[board M1230\]$' "$HONOR_UPSTREAM_DIR/devices/zqc-p.conf" \
 acpi_state="$(assert_acpi_known)"
 log "live ACPI state: $acpi_state"
 
-# Arch's current mkinitcpio ships an official acpi_override install hook. It
-# uses add_file_early(), which is exactly what Linux ACPI table upgrades need.
-[[ -f /usr/lib/initcpio/install/acpi_override ]] \
-    || die "mkinitcpio acpi_override hook is missing: /usr/lib/initcpio/install/acpi_override"
-
 patched="$HONOR_UPSTREAM_DIR/patch/acpi-override/zqc-p/M1010/SSDT27_TPD0.aml"
+hook_src="$HONOR_UPSTREAM_DIR/patch/acpi-override/acpi_override.install"
 [[ "$(md5sum "$patched" | awk '{print $1}')" == "$HONOR_ACPI_PATCHED_MD5" ]] \
     || die "patched ACPI payload hash mismatch"
+[[ -f "$hook_src" ]] || die "pinned upstream ACPI mkinitcpio hook is missing: $hook_src"
 
-log "installing the audited ACPI table into mkinitcpio's override directory"
-install -d -m755 "$HONOR_ACPI_DIR"
+# Use the exact early-CPIO mechanism proven by the HONOR project. The hook is
+# installed in /etc so it overrides any packaged hook with the same name.
+log "installing the audited ACPI table and pinned early-CPIO hook"
+install -d -m755 "$HONOR_ACPI_DIR" "$(dirname "$HONOR_ACPI_HOOK")"
 install -m644 "$patched" "$HONOR_ACPI_FILE"
+install -m755 "$hook_src" "$HONOR_ACPI_HOOK"
 
-log "adding the mkinitcpio ACPI hook through an /etc drop-in"
+# Clean up the first Omarchy adaptation layout if it exists. Those exact files
+# were created by this repository and are no longer used.
+rm -f /etc/initcpio/acpi_override/SSDT27_TPD0.aml
+rmdir /etc/initcpio/acpi_override 2>/dev/null || true
+rm -f /etc/mkinitcpio.conf.d/90-honor-m1230-acpi.conf
+
+log "adding the mkinitcpio ACPI hook through a last-sorting /etc drop-in"
 install -d -m755 "$(dirname "$HONOR_MKINITCPIO_DROPIN")"
 cat > "$HONOR_MKINITCPIO_DROPIN" <<'EOF'
-# HONOR ZQC-P/M1230: put /etc/initcpio/acpi_override/*.aml in the early,
-# uncompressed CPIO using mkinitcpio's official acpi_override hook.
+# HONOR ZQC-P/M1230: append the pinned early-CPIO ACPI override hook after
+# Omarchy's own hook policy has been sourced.
 HOOKS+=(acpi_override)
 EOF
 chmod 644 "$HONOR_MKINITCPIO_DROPIN"
@@ -68,6 +74,23 @@ limine-mkinitcpio
 
 esp="$(sed -n 's/^ESP_PATH=["'\'']\?\([^"'\'']*\).*/\1/p' /etc/default/limine 2>/dev/null | tail -1)"
 esp="${esp:-/boot}"
+
+# limine-mkinitcpio currently warns and continues if one kernel build fails.
+# Verify the image that will actually be booted before telling the user to reboot.
+machine_id="$(cat /etc/machine-id)"
+kernel_name="$(running_kernel_pkgbase)"
+image_ok=0
+for image in \
+    "$esp/$machine_id/$kernel_name/initramfs" \
+    "$esp/EFI/Linux/$kernel_name.efi"; do
+    [[ -r "$image" ]] || continue
+    if lsinitcpio "$image" 2>/dev/null | grep -q 'kernel/firmware/acpi/SSDT27_TPD0.aml'; then
+        log "verified ACPI override inside boot image: $image"
+        image_ok=1
+        break
+    fi
+done
+(( image_ok )) || die "rebuilt Limine image does not contain kernel/firmware/acpi/SSDT27_TPD0.aml; refusing to reboot into an unpatched image"
 if [[ -r "$esp/limine.conf" ]]; then
     grep -q 'xe.enable_psr=1' "$esp/limine.conf" \
         || die "limine-mkinitcpio returned, but $esp/limine.conf does not contain xe.enable_psr=1"
