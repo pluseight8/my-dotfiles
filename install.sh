@@ -143,6 +143,7 @@ systemctl enable honor-force-dsc.service >/dev/null
 systemctl restart honor-force-dsc.service
 systemctl is-active --quiet honor-force-dsc.service \
     || die "honor-force-dsc.service did not become active"
+log "DSC force accepted; if DSC_Enabled is still 'no', the next modeset/reboot will activate it"
 
 log "installing boot health check"
 install -m755 "$ROOT/scripts/health-check.sh" /usr/local/lib/honor/health-check.sh
