@@ -291,3 +291,18 @@ Do not build or pin a locally patched kernel for this setup. Keep using the
 official `linux-omarchy` package delivered by Omarchy. The runtime helpers,
 ACPI override, HID-BPF fixes and keyboard-backlight service are designed to
 survive normal Omarchy kernel updates.
+
+
+## Post-login DSC modeset on the stock kernel
+
+The stock Omarchy kernel can expose `Force_DSC_Enable: yes` before the
+currently running compositor has performed a new modeset. To keep the official
+kernel untouched, this adaptation installs a small user service:
+
+```text
+honor-dsc-modeset.service
+```
+
+It runs after Omarchy/UWSM reaches `graphical-session.target` and briefly
+DPMS-cycles only the internal `eDP-*` output. This gives Hyprland ownership of
+the required modeset without patching `linux-omarchy` or `xe.ko`.
