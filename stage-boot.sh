@@ -98,7 +98,7 @@ done < <(find "$esp/EFI/Linux" -maxdepth 1 -type f -name "*_${kernel_name}.efi" 
 for image in "${images[@]}"; do
     [[ -r "$image" ]] || continue
 
-    rm -rf "$verify_root"/*
+    rm -rf "${verify_root:?}"/*
     if (cd "$verify_root" && lsinitcpio --early -x "$image" >/dev/null 2>&1); then
         extracted="$verify_root/kernel/firmware/acpi/SSDT27_TPD0.aml"
         if [[ -f "$extracted" ]]; then
