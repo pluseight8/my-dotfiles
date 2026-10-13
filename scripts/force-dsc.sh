@@ -32,13 +32,17 @@ grep -q 'DSC_Sink_Support: yes' "$DSC_FILE" || {
 echo 1 > "$DSC_FILE"
 
 for _ in $(seq 1 50); do
-    if grep -q 'Force_DSC_Enable: yes' "$DSC_FILE" \
-       && grep -q 'DSC_Enabled: yes' "$DSC_FILE"; then
+    if grep -q 'Force_DSC_Enable: yes' "$DSC_FILE"; then
+        if grep -q 'DSC_Enabled: yes' "$DSC_FILE"; then
+            echo "HONOR: DSC force is enabled and DSC is active"
+        else
+            echo "HONOR: DSC force is enabled; activation is pending the next display modeset"
+        fi
         exit 0
     fi
     sleep 0.1
 done
 
-echo "HONOR: DSC was requested but did not become active" >&2
+echo "HONOR: kernel did not accept Force_DSC_Enable" >&2
 cat "$DSC_FILE" >&2 || true
 exit 1
