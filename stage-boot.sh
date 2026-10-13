@@ -82,9 +82,20 @@ kernel_name="$(running_kernel_pkgbase)"
 image_ok=0
 verify_root="$(mktemp -d)"
 trap 'rm -rf "$verify_root"' EXIT
-for image in \
-    "$esp/$machine_id/$kernel_name/initramfs" \
-    "$esp/EFI/Linux/$kernel_name.efi"; do
+
+# limine-entry-tool prefixes UKIs with its configured UKI prefix. Omarchy's
+# current prefix is "omarchy", so linux-omarchy becomes
+# /boot/EFI/Linux/omarchy_linux-omarchy.efi. Do not assume one prefix here:
+# discover readable candidates and verify their actual early CPIO contents.
+declare -a images=(
+    "$esp/$machine_id/$kernel_name/initramfs"
+    "$esp/EFI/Linux/$kernel_name.efi"
+)
+while IFS= read -r -d '' uki; do
+    images+=("$uki")
+done < <(find "$esp/EFI/Linux" -maxdepth 1 -type f -name "*_${kernel_name}.efi" -print0 2>/dev/null)
+
+for image in "${images[@]}"; do
     [[ -r "$image" ]] || continue
 
     rm -rf "$verify_root"/*
