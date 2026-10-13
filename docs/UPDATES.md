@@ -58,14 +58,17 @@ For the default Omarchy kernel:
 sudo pacman -S --needed linux-omarchy-headers
 ```
 
-## Why no automatic `xe.ko` rebuild hook exists
+## Why no custom kernel or `xe.ko` exists
 
-This repository deliberately does not overlay Omarchy's Xe driver. The current
-stable kernel already contains the PTL CDCLK fix, and DSC is enabled using the
-existing debugfs interface.
+This repository deliberately keeps the official Omarchy kernel untouched.
+It does not overlay Xe and does not install a locally rebuilt
+`linux-omarchy` package. DSC is requested through the stock driver's existing
+debugfs interface.
 
-That means a normal kernel update does not need a locally rebuilt display
-module.
+The stock kernel currently reaches DSC with `dither=no` at `bpp=24`
+(8 bpc) on this panel. A kernel-side eDP DSC preference patch can reach 10 bpc,
+but carrying it locally would make every Omarchy kernel update a maintenance
+event. This adaptation prioritizes normal Omarchy updates instead.
 
 ## Updating this repository
 
