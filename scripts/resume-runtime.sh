@@ -57,7 +57,7 @@ systemctl daemon-reload
 systemctl enable --now honor-health-check.timer >/dev/null
 
 log "running health check"
-if ! HONOR_ALLOW_PENDING_DSC=1 HONOR_USER="$HONOR_USER" HONOR_ACPI_PATCHED_MD5="$HONOR_ACPI_PATCHED_MD5"     /usr/local/lib/honor/health-check.sh; then
+if ! HONOR_ALLOW_PENDING_DSC="$ALLOW_PENDING_DSC" HONOR_USER="$HONOR_USER" HONOR_ACPI_PATCHED_MD5="$HONOR_ACPI_PATCHED_MD5"     /usr/local/lib/honor/health-check.sh; then
     die "health check failed outside the expected pre-reboot DSC transition; see /var/lib/honor/health-last.txt"
 fi
 
