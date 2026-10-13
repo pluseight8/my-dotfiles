@@ -114,6 +114,7 @@ REQUIRED_HOST_PACKAGES=(
     ninja
     pkgconf
     glib2
+    glib2-devel
     libgusb
     nss
     libgudev
