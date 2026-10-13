@@ -17,11 +17,15 @@ If a new kernel was installed, reboot normally. About one minute after login:
 cat /var/lib/honor/health-last.txt
 ```
 
-Healthy result:
+Healthy result after graphical login:
 
 ```text
 RESULT: OK
 ```
+
+If the first boot-time check runs before the graphical session exists it may
+temporarily write `RESULT: PENDING`. The timer retries every 30 seconds and
+stops itself once the full post-login health check reaches `RESULT: OK`.
 
 ## What survives normal updates
 
