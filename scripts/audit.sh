@@ -123,6 +123,10 @@ check_present 'After=dbus.socket wayland-session-waitenv.service'     "$ROOT/sys
 check_present 'recover_signature' "$ROOT/scripts/dsc-modeset-user.sh"     'DSC helper can recover Hyprland instance signature'
 check_present 'dpmsStatus == true' "$ROOT/scripts/dsc-modeset-user.sh"     'DSC helper verifies actual DPMS state'
 check_present 'bpp=24 \(8 bpc\).*stock Omarchy kernel' "$ROOT/scripts/health-check.sh"     'stock-kernel 8-bpc DSC state is accepted'
+check_present 'try_user_dsc_modeset' "$ROOT/scripts/health-check.sh"     'health check can self-heal pending DSC from the user session'
+check_present 'RESULT: PENDING' "$ROOT/scripts/health-check.sh"     'pre-login DSC state is reported as pending, not healthy'
+check_present 'stop honor-health-check.timer' "$ROOT/scripts/health-check.sh"     'health polling stops after a fully healthy boot'
+check_present 'OnUnitInactiveSec=30s' "$ROOT/systemd/honor-health-check.timer"     'boot health check retries until graphical DSC is ready'
 
 check_present 'probe --set=iso_uuid --fs-uuid' "$ROOT/docs/OMARCHY-USB-BOOT.md"     'USB boot guide probes current ISO UUID'
 check_present 'nomodeset module_blacklist=xe' "$ROOT/docs/OMARCHY-USB-BOOT.md"     'USB boot guide contains proven M1230 temporary graphics workaround'
