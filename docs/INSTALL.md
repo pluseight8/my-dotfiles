@@ -258,8 +258,11 @@ sudo grep -m1 -E 'pipe src=.*bpp=' /sys/kernel/debug/dri/*/i915_display_info
 fprintd-list "$USER"
 ```
 
-For this panel the intended display state is DSC active, `bpp=30`, and
-`dither=no`.
+For this panel the stock-Omarchy target is DSC active with `dither=no`.
+The current official kernel may report `bpp=24` (8 bpc); that is accepted by
+this adaptation so the machine stays on the unmodified Omarchy kernel. A
+kernel-side patch can reach 10 bpc on this panel, but is intentionally not
+installed here.
 
 ## Updates
 
@@ -280,3 +283,11 @@ small module against the headers for the kernel that is actually running.
 
 See [UPDATES.md](UPDATES.md), [TROUBLESHOOTING.md](TROUBLESHOOTING.md), and
 [BIOS-UPDATE.md](BIOS-UPDATE.md) for the recovery paths.
+
+
+## Kernel updates
+
+Do not build or pin a locally patched kernel for this setup. Keep using the
+official `linux-omarchy` package delivered by Omarchy. The runtime helpers,
+ACPI override, HID-BPF fixes and keyboard-backlight service are designed to
+survive normal Omarchy kernel updates.
