@@ -128,9 +128,13 @@ if [[ -n "$DSC_FILE" ]]; then
     grep -q 'Force_DSC_Enable: yes' <<<"$DSC" \
         && ok "DSC force enabled" \
         || bad "DSC force not enabled"
-    grep -q 'DSC_Enabled: yes' <<<"$DSC" \
-        && ok "DSC active" \
-        || bad "DSC forced but not active"
+    if grep -q 'DSC_Enabled: yes' <<<"$DSC"; then
+        ok "DSC active"
+    elif grep -q 'Force_DSC_Enable: yes' <<<"$DSC"; then
+        warn "DSC force is armed but not active yet; a new display modeset/reboot is required"
+    else
+        bad "DSC is neither active nor armed"
+    fi
 else
     bad "i915_dsc_fec_support missing"
 fi
