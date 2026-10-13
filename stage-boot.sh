@@ -80,21 +80,34 @@ esp="${esp:-/boot}"
 machine_id="$(cat /etc/machine-id)"
 kernel_name="$(running_kernel_pkgbase)"
 image_ok=0
+verify_root="$(mktemp -d)"
+trap 'rm -rf "$verify_root"' EXIT
 for image in \
     "$esp/$machine_id/$kernel_name/initramfs" \
     "$esp/EFI/Linux/$kernel_name.efi"; do
     [[ -r "$image" ]] || continue
-    # Do not use grep -q here: with set -o pipefail, grep can exit as soon as
-    # it finds the AML and make lsinitcpio die on SIGPIPE, turning a real match
-    # into a false negative.
-    if lsinitcpio --early "$image" 2>/dev/null \
-        | grep -F 'kernel/firmware/acpi/SSDT27_TPD0.aml' >/dev/null; then
-        log "verified ACPI override inside boot image: $image"
-        image_ok=1
-        break
+
+    rm -rf "$verify_root"/*
+    if (cd "$verify_root" && lsinitcpio --early -x "$image" >/dev/null 2>&1); then
+        extracted="$verify_root/kernel/firmware/acpi/SSDT27_TPD0.aml"
+        if [[ -f "$extracted" ]]; then
+            extracted_hash="$(md5sum "$extracted" | awk '{print $1}')"
+            if [[ "$extracted_hash" == "$HONOR_ACPI_PATCHED_MD5" ]]; then
+                log "verified audited ACPI override inside boot image: $image"
+                image_ok=1
+                break
+            fi
+            warn "ACPI override exists in $image but hash is $extracted_hash (expected $HONOR_ACPI_PATCHED_MD5)"
+        else
+            warn "no SSDT27_TPD0.aml in early CPIO of $image"
+            lsinitcpio --early "$image" 2>/dev/null \
+                | grep -E '(^|/)(kernel/firmware/acpi|SSDT|early_cpio)' >&2 || true
+        fi
+    else
+        warn "could not extract early CPIO from $image"
     fi
 done
-(( image_ok )) || die "rebuilt Limine image does not contain kernel/firmware/acpi/SSDT27_TPD0.aml; refusing to reboot into an unpatched image"
+(( image_ok )) || die "rebuilt Limine image does not contain the audited ACPI override; refusing to reboot into an unpatched image"
 if [[ -r "$esp/limine.conf" ]]; then
     grep -q 'xe.enable_psr=1' "$esp/limine.conf" \
         || die "limine-mkinitcpio returned, but $esp/limine.conf does not contain xe.enable_psr=1"
