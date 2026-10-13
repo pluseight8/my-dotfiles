@@ -70,6 +70,7 @@ sudo pacman -S --needed \
   ninja \
   pkgconf \
   glib2 \
+  glib2-devel \
   libgusb \
   nss \
   libgudev \
