@@ -1,13 +1,17 @@
 # HONOR MagicBook Pro 14 2026 AI (ZQC-P / M1230) — Omarchy
 
-Hardware bring-up for the exact **HONOR ZQC-P / M1230** laptop on current
-**Omarchy**.
+Hardware enablement for the exact **HONOR MagicBook Pro 14 2026 AI,
+ZQC-P / M1230** on **Omarchy**, while keeping Omarchy's own kernel and update
+path intact.
 
-This repository adapts the research and fixes from
-[`rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010`](https://github.com/rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010)
-without blindly running its generic `apply_patch.sh`.
+This repository adapts the audited work from
+`rs0x29a/Linux-on-HONOR-MagicBook-14-Pro-2026-AI_ZQC-P_M1010` to the M1230
+board without blindly applying M1010/M1050 board-specific fixes.
 
-The target machine is intentionally fail-closed:
+## Target hardware
+
+The installer fails closed unless the live machine matches the expected DMI and
+device IDs:
 
 - vendor: `HONOR`
 - product: `ZQC-P`
@@ -16,66 +20,117 @@ The target machine is intentionally fail-closed:
 - touchscreen: `2808:5662`
 - touchpad: `27c6:0f9a`
 - fingerprint: `1c7a:05aa`
-- audio subsystem: `1ee7:209d`
 
-## What this Omarchy adaptation does
+## What it enables
 
-It installs only the fixes that have been observed or can be safely identified
-on this M1230:
+- audited `I2C_DEVT` ACPI override for touchscreen/touchpad enumeration;
+- `xe.enable_psr=1` through Omarchy's Limine drop-in interface;
+- touchscreen mic-mute HID-BPF fix;
+- touchpad left-edge brightness HID-BPF fix;
+- private SDCP-capable libfprint for EgisTec `1c7a:05aa`;
+- M1230 keyboard-backlight LED support as `honor::kbd_backlight`;
+- DSC on the internal OLED through the **stock Omarchy kernel**;
+- a post-login Hyprland modeset helper so DSC actually becomes active;
+- automatic health checks with a final `RESULT: OK/FAIL`.
 
-- byte-checked ACPI `I2C_DEVT` override for touchpad/touchscreen enumeration;
-- `xe.enable_psr=1` through an **Omarchy Limine drop-in**;
-- HID-BPF phantom mic-mute fix for the touchscreen;
-- HID-BPF left-edge brightness gesture for the touchpad;
-- private SDCP-capable libfprint for the EgisTec `1c7a:05aa` reader;
-- M1230-only keyboard-backlight LED driver (`honor::kbd_backlight`);
-- DSC force service for the internal OLED, while keeping Omarchy's stock kernel and `xe.ko`;
-- boot health check with a single `RESULT: OK/FAIL`.
+## What it deliberately does not do
 
-## What it deliberately does *not* do
-
-- no `rpm-ostree` or Bazzite logic;
-- no direct edits to `/etc/default/limine`;
-- no custom kernel and no custom `xe.ko`;
-- no blind reuse of M1010/M1050 EC offsets or Tier-B fixes;
+- no custom `linux-omarchy` build;
+- no replacement `xe.ko`;
+- no Bazzite / `rpm-ostree` path;
+- no direct rewrite of `/etc/default/limine`;
 - no automatic reboot;
-- no `curl | bash`;
-- no Secure-Boot/lockdown bypass.
+- no Secure-Boot or kernel-lockdown bypass;
+- no blind M1010/M1050 EC offsets or other Tier-B board constants.
 
-The old `cdclk-ptl` module patch is also not installed. Omarchy's current
-7.2.8-based kernel already contains the stable Panther Lake CDCLK sanitization
-fix, so carrying another `xe.ko` for it would add risk without adding a fix.
+The observed healthy stock-kernel display state on this M1230 is:
 
-## Installation model
+```text
+DSC active
+bpp=24 (8 bpc)
+dither=no
+```
 
-The process has a hard reboot boundary:
+A kernel-side patch can push this panel to 10 bpc, but this repository
+intentionally does **not** carry it because the priority is normal
+`omarchy-update` behavior with the official kernel.
 
-1. install host dependencies manually;
-2. run `preflight.sh`;
-3. run `stage-boot.sh`;
-4. reboot **yourself**;
-5. run `install.sh`;
-6. enroll the fingerprint and let Omarchy configure its own PAM/lock integration.
+## If the Omarchy USB artifacts before the installer
 
-Start with [`docs/INSTALL.md`](docs/INSTALL.md). Do not skip the preflight.
+See:
 
-The scripts never reboot the laptop for you.
+**[docs/OMARCHY-USB-BOOT.md](docs/OMARCHY-USB-BOOT.md)**
 
+It contains the exact GRUB commands that successfully booted the Omarchy ISO on
+this laptop using a temporary:
 
-## Kernel policy
+```text
+nomodeset module_blacklist=xe
+```
 
-This adaptation intentionally stays on the **official Omarchy kernel package**.
-It does not build or install a locally patched `linux-omarchy`.
+workaround. Those arguments are live-USB-only and are not installed into the
+final system.
 
-On the current stock kernel the internal panel is considered healthy when DSC
-is active with `dither=no`. The observed stock-kernel mode is `bpp=24`
-(8 bpc). Reaching `bpp=30` (10 bpc) currently requires a kernel-side eDP DSC
-preference patch, which this repository deliberately does **not** install so
-normal Omarchy kernel updates remain untouched.
+## Recommended post-install path
 
+After Omarchy is installed and you are at the desktop:
 
-### Stock-kernel DSC activation
+```bash
+sudo git clone https://github.com/pluseight8/my-dotfiles.git \
+  /var/opt/pluseight8-my-dotfiles
+sudo chown -R "$USER:$(id -gn)" /var/opt/pluseight8-my-dotfiles
+cd /var/opt/pluseight8-my-dotfiles
+./setup.sh
+```
 
-A per-user `honor-dsc-modeset.service` runs after Omarchy's graphical session
-starts and triggers one brief DPMS cycle on the internal eDP panel. This applies
-the already-armed DSC setting while preserving the official Omarchy kernel.
+`setup.sh` is the preferred path. It incorporates the failure cases that were
+found while bringing this exact machine up:
+
+- accepts Omarchy's real `ID=omarchy`;
+- installs the full host dependency set, including `glib2-devel` and `jq`;
+- verifies the actual early-CPIO ACPI payload inside Omarchy's generated UKI;
+- discovers Omarchy-prefixed UKIs instead of assuming a filename;
+- verifies ACPI by the live table hash instead of fragile kernel-log wording;
+- keeps the stock Omarchy kernel;
+- handles DSC as a two-stage arm + compositor modeset operation;
+- tolerates Hyprland's transient DPMS `NOTRUNNING` status and verifies actual
+  monitor state instead;
+- gives one final health result.
+
+The first run stops after staging boot fixes and tells you to reboot. After
+logging back in, run the **same command again**:
+
+```bash
+cd /var/opt/pluseight8-my-dotfiles
+./setup.sh
+```
+
+No repository script reboots the machine automatically.
+
+## Manual path
+
+If you prefer to inspect each phase separately, use
+[docs/INSTALL.md](docs/INSTALL.md).
+
+## Updating later
+
+Update Omarchy normally:
+
+```bash
+omarchy-update
+```
+
+After a kernel update and reboot:
+
+```bash
+cat /var/lib/honor/health-last.txt
+```
+
+A healthy machine ends with:
+
+```text
+RESULT: OK
+```
+
+See [docs/UPDATES.md](docs/UPDATES.md) for the persistence model and recovery
+steps.
