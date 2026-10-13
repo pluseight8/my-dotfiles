@@ -1,51 +1,134 @@
 # Installation on Omarchy
 
-This guide is for the exact **HONOR MagicBook Pro 14 2026 AI, ZQC-P / M1230**.
+This guide is for the exact **HONOR MagicBook Pro 14 2026 AI,
+ZQC-P / M1230**.
 
-The setup is split into three explicit phases. None of the scripts reboots the
-machine for you.
+For the easiest path, use the guided installer:
 
-## 1. Update Omarchy first
+```bash
+cd /var/opt/pluseight8-my-dotfiles
+./setup.sh
+```
 
-From your normal session:
+It is intentionally a **two-pass** setup because the ACPI override cannot be
+validated until after a reboot. The script never reboots the laptop for you.
+
+This document also shows the manual phases in full.
+
+## 0. If the Omarchy USB itself artifacts
+
+Use [OMARCHY-USB-BOOT.md](OMARCHY-USB-BOOT.md). It contains the GRUB commands
+used successfully on this exact laptop.
+
+The temporary live-USB workaround is:
+
+```text
+nomodeset module_blacklist=xe
+```
+
+Do not copy those arguments into the installed system.
+
+## 1. Install and update Omarchy normally
+
+Install Omarchy from the official ISO, boot the installed system and run:
 
 ```bash
 omarchy-update
 ```
 
-If the update installed a new kernel, reboot and log back in before continuing:
+If that updated the kernel, reboot before continuing:
 
 ```bash
 systemctl reboot
 ```
 
-Confirm that the running kernel is an Omarchy kernel and that matching headers
-can be installed for it:
+Check:
 
 ```bash
 uname -r
 cat /usr/lib/modules/"$(uname -r)"/pkgbase
 ```
 
-The pkgbase must start with `linux-omarchy`.
+The pkgbase must begin with:
 
-## 2. Keep Secure Boot / kernel lockdown off
+```text
+linux-omarchy
+```
 
-This adaptation uses an early ACPI table override and one local out-of-tree
-keyboard-backlight module. The installer therefore refuses to continue while
-kernel lockdown is active.
+This repository deliberately stays on that stock Omarchy kernel.
 
-Check:
+## 2. Secure Boot / lockdown
+
+The ACPI early override and local keyboard-backlight module require kernel
+lockdown to be off.
 
 ```bash
 cat /sys/kernel/security/lockdown 2>/dev/null || true
 ```
 
-If the file exists, the selected state must be `[none]`.
+If the file exists, the selected value must be `[none]`.
 
-## 3. Install host dependencies manually
+The scripts refuse to continue if Secure Boot / lockdown is active.
 
-The repository does **not** install packages on your behalf.
+## 3. Clone this repository
+
+Recommended persistent checkout:
+
+```bash
+sudo git clone https://github.com/pluseight8/my-dotfiles.git \
+  /var/opt/pluseight8-my-dotfiles
+sudo chown -R "$USER:$(id -gn)" /var/opt/pluseight8-my-dotfiles
+cd /var/opt/pluseight8-my-dotfiles
+```
+
+## 4. Recommended: guided setup
+
+Run as your normal user:
+
+```bash
+./setup.sh
+```
+
+If packages are missing it prints them and asks for exactly:
+
+```text
+INSTALL-DEPS
+```
+
+The required set includes the dependency that previously broke the SDCP
+libfprint build (`glib2-devel`) and the `jq` dependency used by the
+post-login DSC helper.
+
+The first pass:
+
+1. validates Omarchy and exact M1230 DMI;
+2. validates the stock Omarchy kernel;
+3. installs missing host dependencies after confirmation;
+4. runs the repository audit;
+5. runs the read-only hardware preflight;
+6. stages the ACPI and PSR boot fixes;
+7. verifies the actual generated UKI contains the audited AML;
+8. stops and tells you to reboot.
+
+Reboot yourself:
+
+```bash
+systemctl reboot
+```
+
+After login, run the same command again:
+
+```bash
+cd /var/opt/pluseight8-my-dotfiles
+./setup.sh
+```
+
+The second pass detects the already-active patched ACPI table and continues with
+runtime fixes.
+
+## 5. Manual dependency installation
+
+Skip this section when using `setup.sh`.
 
 Resolve the running kernel package base:
 
@@ -54,7 +137,7 @@ KERNEL_PKGBASE="$(cat /usr/lib/modules/"$(uname -r)"/pkgbase)"
 echo "$KERNEL_PKGBASE"
 ```
 
-Then install the dependencies:
+Install:
 
 ```bash
 sudo pacman -S --needed \
@@ -64,6 +147,7 @@ sudo pacman -S --needed \
   bpf \
   udev-hid-bpf \
   curl \
+  jq \
   usbutils \
   fprintd \
   meson \
@@ -81,228 +165,214 @@ sudo pacman -S --needed \
   "${KERNEL_PKGBASE}-headers"
 ```
 
-If that transaction updates the kernel, reboot once and repeat the pkgbase /
-header check before continuing.
+If the transaction leaves matching headers unavailable for the kernel returned
+by `uname -r`, reboot into the newly installed Omarchy kernel and retry.
 
-## 4. Clone the Omarchy adaptation
-
-Recommended persistent checkout:
-
-```bash
-sudo git clone https://github.com/pluseight8/my-dotfiles.git \
-  /var/opt/pluseight8-my-dotfiles
-
-sudo chown -R "$USER:$(id -gn)" /var/opt/pluseight8-my-dotfiles
-cd /var/opt/pluseight8-my-dotfiles
-```
-
-Run the repository audit before touching the machine:
+## 6. Repository audit
 
 ```bash
 ./scripts/audit.sh
 ```
 
-The final line must be:
+Expected:
 
 ```text
 AUDIT RESULT: OK
 ```
 
-## 5. Preflight
+The audit contains regression checks for the installation failures encountered
+during the original M1230 bring-up.
 
-Run:
+## 7. Preflight
 
 ```bash
 sudo ./preflight.sh
 ```
 
-Read the summary and type `CHECK`.
+Type:
 
-The preflight:
+```text
+CHECK
+```
 
-- verifies exact DMI identity for ZQC-P / M1230;
-- verifies the running Omarchy kernel and matching headers;
-- refuses Secure-Boot / lockdown states incompatible with this setup;
-- checks the live `I2C_DEVT` table against the audited hashes;
-- clones the HONOR hardware repository at the pinned commit;
-- adds a local **probed** M1230 profile containing only the audited Tier-A fixes.
+It verifies:
 
-It does **not** modify the boot configuration.
+- exact HONOR / ZQC-P / M1230 identity;
+- real Omarchy detection, including `ID=omarchy`;
+- official Omarchy kernel pkgbase;
+- matching headers;
+- lockdown state;
+- HID-BPF/BTF support;
+- pinned HONOR source commit/tree;
+- live `I2C_DEVT` against the audited stock/patched hashes.
 
-Expected ending:
+Expected:
 
 ```text
 PREFLIGHT: OK
 ```
 
-## 6. Stage the boot fixes
-
-Run:
+## 8. Stage boot fixes
 
 ```bash
 sudo ./stage-boot.sh
 ```
 
-This installs the audited ACPI AML into:
+The final ACPI layout is:
 
 ```text
-/etc/initcpio/acpi_override/SSDT27_TPD0.aml
+/usr/lib/firmware/acpi/SSDT27_TPD0.aml
+/etc/initcpio/install/acpi_override
+/etc/mkinitcpio.conf.d/zz-honor-m1230-acpi.conf
 ```
 
-and adds the official mkinitcpio `acpi_override` hook via:
+The last-sorting mkinitcpio drop-in adds:
 
-```text
-/etc/mkinitcpio.conf.d/90-honor-m1230-acpi.conf
+```bash
+HOOKS+=(acpi_override)
 ```
 
-It also adds:
-
-```text
-xe.enable_psr=1
-```
-
-through Omarchy's Limine drop-in interface:
+The PSR setting is added through Omarchy's supported Limine drop-in:
 
 ```text
 /etc/limine-entry-tool.d/90-honor-m1230.conf
 ```
 
-Finally it rebuilds the boot entries with:
+with:
 
 ```bash
-limine-mkinitcpio
+KERNEL_CMDLINE[default]+=" xe.enable_psr=1"
 ```
 
-Expected ending:
+Then `limine-mkinitcpio` rebuilds the Omarchy boot images.
+
+The stage is considered successful only after the script **extracts the early
+CPIO from the real generated boot image**, including Omarchy-prefixed UKI names
+such as:
+
+```text
+/boot/EFI/Linux/omarchy_linux-omarchy.efi
+```
+
+and verifies that the exact audited AML is inside it.
+
+Expected:
 
 ```text
 BOOT STAGE: OK
 ```
 
-The script deliberately does not reboot.
-
-## 7. Reboot yourself
+Now reboot yourself:
 
 ```bash
 systemctl reboot
 ```
 
-After logging back in:
+## 9. Runtime install after reboot
+
+After login:
 
 ```bash
 cd /var/opt/pluseight8-my-dotfiles
-```
-
-## 8. Install runtime fixes
-
-Run:
-
-```bash
 sudo ./install.sh
 ```
 
-Read the summary and type `INSTALL`.
-
-Before installing anything, the script proves that the rebooted system is
-actually using the corrected ACPI table and `xe.enable_psr=1`.
-
-It then installs:
-
-- touchscreen mic-mute HID-BPF fix;
-- touchpad left-edge brightness HID-BPF fix;
-- EgisTec `1c7a:05aa` SDCP libfprint support;
-- M1230 keyboard-backlight LED module/service;
-- DSC force service for the internal OLED;
-- boot health-check timer.
-
-It does **not** install a replacement `xe.ko`.
-
-Expected ending:
+Type:
 
 ```text
-RUNTIME INSTALL: OK
+INSTALL
 ```
 
-## 9. Let Omarchy configure fingerprint authentication
+Before installing anything, `install.sh` verifies the **live** ACPI table hash
+and `xe.enable_psr=1`. It does not rely on one exact kernel-log phrase.
 
-Return to your normal user shell and run:
+It installs:
+
+- touchscreen mic-mute HID-BPF;
+- touchpad-edge brightness HID-BPF;
+- EgisTec `1c7a:05aa` SDCP libfprint support;
+- M1230 keyboard-backlight service;
+- root DSC force service;
+- post-login Hyprland DSC modeset helper;
+- boot health-check timer.
+
+It does **not** install a custom kernel or replacement `xe.ko`.
+
+## 10. DSC behavior on stock Omarchy
+
+The stock driver can accept:
+
+```text
+Force_DSC_Enable: yes
+```
+
+before the current compositor mode has actually switched to DSC.
+
+The root service arms DSC. A user service waits for Omarchy/UWSM's Wayland
+session and triggers one short DPMS cycle on the internal `eDP-*` output.
+
+Hyprland may transiently return `7/NOTRUNNING` during that intentional DPMS
+transition. The helper therefore verifies the **actual monitor `dpmsStatus`**
+instead of treating that transient return code as proof of failure.
+
+Healthy stock-kernel state:
+
+```text
+DSC_Enabled: yes
+Force_DSC_Enable: yes
+bpp=24
+dither=no
+```
+
+The repository intentionally accepts 8 bpc here to preserve the official
+Omarchy kernel/update path.
+
+## 11. Fingerprint enrollment
+
+Hardware support and Omarchy authentication policy are separate.
+
+After the runtime install, as your normal user run:
 
 ```bash
 omarchy-setup-security-fingerprint
 ```
 
-That is intentionally left to Omarchy because Omarchy owns its own sudo,
-polkit and lock-screen fingerprint integration.
+Omarchy then owns the sudo/polkit/lock-screen integration.
 
-## 10. Final verification
-
-Check:
+## 12. Final verification
 
 ```bash
 cat /var/lib/honor/health-last.txt
 ```
 
-Healthy output ends with:
+The final line must be:
 
 ```text
 RESULT: OK
 ```
 
-Useful direct checks:
+A healthy post-reboot display section should include:
 
-```bash
-cat /sys/module/xe/parameters/enable_psr
-ls -ld /sys/class/leds/honor::kbd_backlight
-sudo cat /sys/kernel/debug/dri/*/eDP-*/i915_dsc_fec_support
-sudo grep -m1 -E 'pipe src=.*bpp=' /sys/kernel/debug/dri/*/i915_display_info
-fprintd-list "$USER"
+```text
+[ OK ] DSC force enabled
+[ OK ] DSC active
+[ OK ] display: bpp=24 (8 bpc), dither=no on stock Omarchy kernel
 ```
 
-For this panel the stock-Omarchy target is DSC active with `dither=no`.
-The current official kernel may report `bpp=24` (8 bpc); that is accepted by
-this adaptation so the machine stays on the unmodified Omarchy kernel. A
-kernel-side patch can reach 10 bpc on this panel, but is intentionally not
-installed here.
+## 13. Normal updates
 
-## Updates
-
-Normal Omarchy updates remain normal:
+Use Omarchy normally:
 
 ```bash
 omarchy-update
 ```
 
-After a kernel update and reboot, wait about one minute and inspect:
+After a kernel update/reboot:
 
 ```bash
 cat /var/lib/honor/health-last.txt
 ```
 
-The HID-BPF objects are CO-RE. The keyboard-backlight service rebuilds its
-small module against the headers for the kernel that is actually running.
+No custom kernel rebuild is part of this setup.
 
-See [UPDATES.md](UPDATES.md), [TROUBLESHOOTING.md](TROUBLESHOOTING.md), and
-[BIOS-UPDATE.md](BIOS-UPDATE.md) for the recovery paths.
-
-
-## Kernel updates
-
-Do not build or pin a locally patched kernel for this setup. Keep using the
-official `linux-omarchy` package delivered by Omarchy. The runtime helpers,
-ACPI override, HID-BPF fixes and keyboard-backlight service are designed to
-survive normal Omarchy kernel updates.
-
-
-## Post-login DSC modeset on the stock kernel
-
-The stock Omarchy kernel can expose `Force_DSC_Enable: yes` before the
-currently running compositor has performed a new modeset. To keep the official
-kernel untouched, this adaptation installs a small user service:
-
-```text
-honor-dsc-modeset.service
-```
-
-It runs after Omarchy/UWSM reaches `graphical-session.target` and briefly
-DPMS-cycles only the internal `eDP-*` output. This gives Hyprland ownership of
-the required modeset without patching `linux-omarchy` or `xe.ko`.
+See [UPDATES.md](UPDATES.md) and [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
