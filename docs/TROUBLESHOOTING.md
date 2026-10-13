@@ -243,6 +243,24 @@ test -e /usr/lib/modules/"$(uname -r)"/build/Makefile && echo headers-ok
 sudo systemctl restart honor-zqcp-kbdlight.service
 ```
 
+## `health-last.txt` says `RESULT: PENDING`
+
+This is not a final failure. It means the system health check ran before a
+usable graphical user session/modeset existed.
+
+The boot timer retries automatically every 30 seconds. Once the normal Omarchy
+session is available, the root health check attempts the user DSC modeset
+helper, refreshes the DSC/display state, writes the final result and stops the
+timer for the rest of that boot.
+
+After login, wait up to about a minute and run:
+
+```bash
+cat /var/lib/honor/health-last.txt
+```
+
+The target is `RESULT: OK`.
+
 ## DSC is armed but not active
 
 Check root-side state:
