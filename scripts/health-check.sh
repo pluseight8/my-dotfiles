@@ -33,9 +33,9 @@ find_live_i2c_devt() {
     local f oem
     for f in /sys/firmware/acpi/tables/SSDT*; do
         [[ -e "$f" ]] || continue
-        oem="$(dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\\0 ' || true)"
+        oem="$(dd if="$f" bs=1 skip=16 count=8 status=none 2>/dev/null | tr -d '\0 ' || true)"
         if [[ "$oem" == I2C_DEVT ]]; then
-            printf '%s\\n' "$f"
+            printf '%s\n' "$f"
             return 0
         fi
     done
