@@ -1,0 +1,206 @@
+From: Ruslan Shevchenko <rshevchenko@neoflex.ru>
+Subject: [PATCH] drm/i915/dp: prefer DSC over driving eDP below 8 bpc
+
+intel_dp_compute_link_config_wide() may reduce pipe_bpp all the way to
+6 bpc for RGB to make a mode fit the link, and compression is only
+considered after that search fails. On a panel that supports DSC the
+result can be a link that is nowhere near saturated carrying a picture
+with two bits per colour thrown away.
+
+A concrete one: the eDP panel in a HONOR MagicBook Pro 14 (ZQC-P) is
+3120x2080 at 120 Hz, declares 10 bpc in its EDID, and its DPCD offers
+exactly two link rates, 2.7 and 5.4 Gbps. Four lanes of HBR2 leave
+2160000 of headroom, 24 bpp needs 2702592 and 18 bpp needs 2026944, so
+the driver settles on 18 bpp with dithering:
+
+  DP link limits: pixel clock 900864 kHz DSC off max lanes 4
+      max rate 540000 max pipe_bpp 30 min link_bpp 18.0000 max link_bpp 30.0000
+  DP lane count 4 clock 540000 bpp input 18 compressed 0.0000
+      link rate required 2026944 available 2160000
+  hw max bpp: 30, pipe bpp: 18, dithering: 1
+
+There is no "Try DSC" line anywhere in that log. The panel advertises
+DSC 1.2 with 4 slices and 8 and 10 bpc decode, the VBT does not set
+edp_dsc_disable for it, and forcing compression through debugfs gives
+10 bpc with no dithering at less than half the link load:
+
+  DP DSC computed with Input Bpp = 30 Compressed Bpp = 8.0000 Slice Count = 4
+  DP lane count 4 clock 540000 bpp input 30 compressed 8.0000
+      link rate required 900864 available 2160000
+
+with a clean link: CR, EQ and symbol lock on all four lanes,
+INTERLANE_ALIGN_DONE, and zero symbol errors.
+
+Dithering down to 6 bpc predates DSC and was the right answer when the
+alternative was no picture at all. Where the sink can decompress, it no
+longer is. So when the uncompressed pass lands below 8 bpc on eDP while
+the panel itself would take more, try compression instead.
+
+This is a preference rather than a requirement, so it must never turn a
+mode that works today into a rejected one: if the DSC pass fails for any
+reason the uncompressed result is put back and the modeset proceeds as
+before. It is deliberately limited to eDP, where the link is a fixed
+property of the machine; on external DP a link that cannot carry 8 bpc
+is more often a cable than a design.
+
+One detail is easy to get wrong and is worth spelling out.
+intel_dp_compute_config_limits() derives the DSC input depth from the pipe
+bpp already in the crtc state:
+
+  limits->pipe.max_bpp = clamp(crtc_state->pipe_bpp,
+			       limits->pipe.min_bpp, limits->pipe.max_bpp);
+
+When compression is required that is still the depth the modeset arrived
+with. When it is merely preferred, the uncompressed search has already
+written its own answer there, so feeding it back in compresses the reduced
+depth rather than the one the panel can take: 18 clamps up to the DSC
+minimum of 24 and stops, on a panel that would have taken 30. Measured on
+the machine above, where the difference is 8 bits per colour against 10.
+So the baseline is restored before the DSC pass.
+
+Signed-off-by: Ruslan Shevchenko <rshevchenko@neoflex.ru>
+---
+--- a/drivers/gpu/drm/i915/display/intel_dp.c
++++ b/drivers/gpu/drm/i915/display/intel_dp.c
+@@ -2858,7 +2858,9 @@
+ 		&pipe_config->hw.adjusted_mode;
+ 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
+ 	struct link_config_limits limits;
+-	bool dsc_needed, joiner_needs_dsc;
++	bool dsc_needed, joiner_needs_dsc, dsc_preferred = false;
++	int uncompressed_bpp = 0, uncompressed_clock = 0, uncompressed_lanes = 0;
++	int entry_bpp = pipe_config->pipe_bpp;
+ 	int ret = 0;
+ 
+ 	intel_dp_dsc_reset_config(pipe_config);
+@@ -2893,6 +2895,31 @@
+ 					   0,
+ 					   num_joined_pipes))
+ 			dsc_needed = true;
++		else if (intel_dp_is_edp(intel_dp) &&
++			 pipe_config->pipe_bpp < 8 * 3 &&
++			 pipe_config->pipe_bpp < limits.pipe.max_bpp &&
++			 intel_dp_supports_dsc(intel_dp, connector, pipe_config)) {
++			/*
++			 * The uncompressed search is allowed to give up colour
++			 * depth to make a mode fit, down to 6 bpc for RGB. That
++			 * predates DSC, and where the sink can decompress it is
++			 * the worse of the two answers: an eDP panel driven at
++			 * 6 bpc with dithering has visibly less to work with
++			 * than the same panel at 8 bpc or better over a
++			 * compressed link.
++			 *
++			 * So when the link forced the pipe below 8 bpc while
++			 * the panel itself would take more, try compression
++			 * instead. This is a preference and not a requirement,
++			 * and it is deliberately not applied to external DP,
++			 * where a link that cannot carry 8 bpc is far more
++			 * often a cable than a design.
++			 */
++			uncompressed_bpp = pipe_config->pipe_bpp;
++			uncompressed_clock = pipe_config->port_clock;
++			uncompressed_lanes = pipe_config->lane_count;
++			dsc_preferred = true;
++		}
+ 	}
+ 
+ 	if (dsc_needed && !intel_dp_supports_dsc(intel_dp, connector, pipe_config)) {
+@@ -2900,33 +2927,78 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	if (dsc_needed) {
++	if (dsc_needed || dsc_preferred) {
+ 		int dsc_slice_count;
+ 
+ 		drm_dbg_kms(display->drm,
+-			    "Try DSC (fallback=%s, joiner=%s, force=%s)\n",
++			    "Try DSC (fallback=%s, joiner=%s, force=%s, preferred=%s)\n",
+ 			    str_yes_no(ret), str_yes_no(joiner_needs_dsc),
+-			    str_yes_no(intel_dp->force_dsc_en));
++			    str_yes_no(intel_dp->force_dsc_en),
++			    str_yes_no(dsc_preferred));
+ 
+-		if (!intel_dp_compute_config_limits(intel_dp, conn_state, pipe_config,
+-						    respect_downstream_limits,
+-						    true,
+-						    &limits))
+-			return -EINVAL;
+-
+-		ret = intel_dp_dsc_compute_config(intel_dp, pipe_config,
+-						  conn_state, &limits, 64);
+-		if (ret < 0)
+-			return ret;
++		ret = -EINVAL;
+ 
+-		dsc_slice_count = intel_dsc_line_slice_count(&pipe_config->dsc.slice_config);
++		/*
++		 * intel_dp_compute_config_limits() derives the DSC input depth
++		 * from crtc_state->pipe_bpp:
++		 *
++		 *   limits->pipe.max_bpp = clamp(crtc_state->pipe_bpp,
++		 *				limits->pipe.min_bpp,
++		 *				limits->pipe.max_bpp);
++		 *
++		 * When DSC is required that value is still the one the modeset
++		 * arrived with. When it is merely preferred, the uncompressed
++		 * search has already written its own answer there, and feeding
++		 * that back in would compress the reduced depth instead of the
++		 * one the panel can actually take: 6 bpc clamps up to the DSC
++		 * minimum of 8 and stops, on a panel that would have taken 10.
++		 * Put the baseline back first.
++		 */
++		if (dsc_preferred)
++			pipe_config->pipe_bpp = entry_bpp;
+ 
+-		if (!intel_dp_dotclk_valid(display,
+-					   adjusted_mode->crtc_clock,
+-					   adjusted_mode->crtc_htotal,
+-					   dsc_slice_count,
+-					   num_joined_pipes))
+-			return -EINVAL;
++		if (intel_dp_compute_config_limits(intel_dp, conn_state, pipe_config,
++						   respect_downstream_limits,
++						   true,
++						   &limits)) {
++			ret = intel_dp_dsc_compute_config(intel_dp, pipe_config,
++							  conn_state, &limits, 64);
++
++			if (ret >= 0) {
++				dsc_slice_count =
++					intel_dsc_line_slice_count(&pipe_config->dsc.slice_config);
++
++				if (!intel_dp_dotclk_valid(display,
++							   adjusted_mode->crtc_clock,
++							   adjusted_mode->crtc_htotal,
++							   dsc_slice_count,
++							   num_joined_pipes))
++					ret = -EINVAL;
++			}
++		}
++
++		if (ret < 0) {
++			/*
++			 * Compression was required, so there is nothing to fall
++			 * back to and the mode genuinely cannot be driven.
++			 */
++			if (dsc_needed)
++				return ret;
++
++			/*
++			 * Compression was only preferred. Put back what the
++			 * uncompressed pass had already found: a dithered
++			 * picture beats a rejected modeset.
++			 */
++			drm_dbg_kms(display->drm,
++				    "DSC preferred but not usable, keeping %d bpp uncompressed\n",
++				    uncompressed_bpp);
++
++			intel_dp_dsc_reset_config(pipe_config);
++			pipe_config->pipe_bpp = uncompressed_bpp;
++			pipe_config->port_clock = uncompressed_clock;
++			pipe_config->lane_count = uncompressed_lanes;
++		}
+ 	}
+ 
+ 	drm_dbg_kms(display->drm,
