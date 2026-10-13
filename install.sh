@@ -150,7 +150,6 @@ install -m755 "$ROOT/scripts/dsc-modeset-user.sh" /usr/local/lib/honor/dsc-modes
 install -m644 "$ROOT/systemd/honor-dsc-modeset.service" /etc/systemd/user/honor-dsc-modeset.service
 
 USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
-USER_UID="$(id -u "$TARGET_USER")"
 USER_GROUP="$(id -gn "$TARGET_USER")"
 install -d -m755 -o "$TARGET_USER" -g "$USER_GROUP" "$USER_HOME/.config/systemd/user/graphical-session.target.wants"
 ln -sfn /etc/systemd/user/honor-dsc-modeset.service     "$USER_HOME/.config/systemd/user/graphical-session.target.wants/honor-dsc-modeset.service"
