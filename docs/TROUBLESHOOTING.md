@@ -1,20 +1,58 @@
 # Troubleshooting
 
-Start with:
+Start with the machine-wide health result:
 
 ```bash
 cat /var/lib/honor/health-last.txt
 ```
 
-Then inspect:
+Then inspect the install log when the failure happened during setup:
 
 ```bash
 sudo less /var/log/honor-m1230-install.log
 ```
 
-## `preflight.sh` refuses the machine
+The guided installer is safe to rerun:
 
-Print the identity:
+```bash
+cd /var/opt/pluseight8-my-dotfiles
+./setup.sh
+```
+
+It detects whether the live ACPI table is still stock or already patched and
+continues from the appropriate phase.
+
+## Omarchy ISO artifacts before the installer
+
+Use [OMARCHY-USB-BOOT.md](OMARCHY-USB-BOOT.md).
+
+The proven live-USB-only workaround is:
+
+```text
+nomodeset module_blacklist=xe
+```
+
+Do not add those parameters to the installed Omarchy system.
+
+## `preflight.sh` says this is not Omarchy
+
+Current Omarchy reports its own OS ID. The repository explicitly accepts
+`ID=omarchy` as well as Arch-compatible `ID_LIKE` values.
+
+Check:
+
+```bash
+cat /etc/os-release
+omarchy-version
+pacman -Q omarchy
+```
+
+If this fails on an otherwise normal Omarchy install, update this repository
+before changing the detection logic by hand.
+
+## Wrong machine / DMI refusal
+
+Print:
 
 ```bash
 for f in sys_vendor product_name board_version board_name product_sku; do
@@ -23,66 +61,128 @@ for f in sys_vendor product_name board_version board_name product_sku; do
 done
 ```
 
-This repository is intentionally restricted to `HONOR / ZQC-P / M1230`.
+This repository intentionally targets only the audited
+`HONOR / ZQC-P / M1230 / ZQC-P-PCB` state.
 
-## Lockdown / Secure Boot refusal
-
-Check:
+## Secure Boot / lockdown refusal
 
 ```bash
 cat /sys/kernel/security/lockdown 2>/dev/null || true
 ```
 
-The selected state must be `[none]`. Do not patch the scripts to bypass this:
-the ACPI override and local keyboard module are exactly the kinds of operations
-lockdown is intended to restrict.
+The selected state must be `[none]`.
+
+Do not patch the guard out. The ACPI table override and unsigned local
+keyboard-backlight module are exactly the operations kernel lockdown is meant
+to restrict.
+
+## Missing dependencies
+
+Use the guided installer:
+
+```bash
+./setup.sh
+```
+
+It installs missing packages only after explicit confirmation.
+
+Two dependencies that are easy to miss manually are:
+
+```text
+glib2-devel
+jq
+```
+
+`glib2-devel` is required by the SDCP libfprint Meson build; `jq` is used
+by the post-login Hyprland DSC helper.
+
+## Kernel headers do not match the running kernel
+
+Check:
+
+```bash
+uname -r
+cat /usr/lib/modules/"$(uname -r)"/pkgbase
+test -e /usr/lib/modules/"$(uname -r)"/build/Makefile && echo headers-ok
+```
+
+If an update installed a new kernel/headers but you are still running the old
+kernel, reboot once and rerun `./setup.sh`.
+
+Do not build a module against headers for a different running kernel.
 
 ## ACPI hash mismatch
 
-Do not use `FORCE_ACPI=1` and do not copy the M1010 table by hand.
+The live table must equal either the audited stock hash or the exact patched
+hash.
 
-The preflight accepts only the audited stock M1230-equivalent `I2C_DEVT` bytes
-or the exact patched bytes. A different hash means the firmware changed or this
-is not the same hardware state the patch was derived from.
+Do not use a force flag and do not copy a random M1010 AML by hand. A different
+hash can mean different firmware and requires a fresh audit.
 
-## ACPI override did not load
+## ACPI override did not load after reboot
+
+The persistent files are:
+
+```text
+/usr/lib/firmware/acpi/SSDT27_TPD0.aml
+/etc/initcpio/install/acpi_override
+/etc/mkinitcpio.conf.d/zz-honor-m1230-acpi.conf
+```
 
 Check:
 
 ```bash
-sudo journalctl -k -b --no-pager | \
-  grep -iE 'Table Upgrade|I2C_DEVT|AE_AML_INTERNAL|locked down'
+sudo md5sum /usr/lib/firmware/acpi/SSDT27_TPD0.aml
+cat /etc/mkinitcpio.conf.d/zz-honor-m1230-acpi.conf
 ```
 
-Check the staged files:
+Re-run:
 
 ```bash
-md5sum /etc/initcpio/acpi_override/SSDT27_TPD0.aml
-cat /etc/mkinitcpio.conf.d/90-honor-m1230-acpi.conf
+sudo ./stage-boot.sh
 ```
 
-Rebuild explicitly:
+Do not trust only a kernel-log phrase. The installer and health check use the
+**live ACPI table hash** as the authoritative test.
 
-```bash
-sudo limine-mkinitcpio
+### If `stage-boot.sh` says the rebuilt image does not contain the AML
+
+Do not reboot.
+
+The script verifies the real generated UKI by extracting its early CPIO. It
+also discovers Omarchy-prefixed UKIs such as:
+
+```text
+/boot/EFI/Linux/omarchy_linux-omarchy.efi
 ```
 
-Then reboot yourself.
-
-## `xe.enable_psr` is not `1`
-
-Check:
+If verification fails, collect:
 
 ```bash
-cat /etc/limine-entry-tool.d/90-honor-m1230.conf
-grep -R "enable_psr" /etc/default/limine /etc/limine-entry-tool.d 2>/dev/null
+ls -l /boot/EFI/Linux/
+cat /etc/mkinitcpio.conf.d/zz-honor-m1230-acpi.conf
+ls -l /usr/lib/firmware/acpi/SSDT27_TPD0.aml
+```
+
+and inspect the full `stage-boot.sh` output before rebooting.
+
+## `xe.enable_psr` is not 1
+
+```bash
 cat /sys/module/xe/parameters/enable_psr
+grep -R "enable_psr" /etc/default/limine /etc/limine-entry-tool.d 2>/dev/null
 ```
 
-There must not be a second conflicting `xe.enable_psr=` or
+The repository owns:
+
+```text
+/etc/limine-entry-tool.d/90-honor-m1230.conf
+```
+
+There must not be a conflicting second `xe.enable_psr=` or
 `i915.enable_psr=` setting.
 
-After correcting the conflict:
+After resolving a conflict:
 
 ```bash
 sudo limine-mkinitcpio
@@ -95,10 +195,10 @@ systemctl reboot
 ls /sys/bus/hid/devices | grep -iE '2808:5662|27c6:0f9a'
 ```
 
-If the devices are absent, fix ACPI first. HID-BPF cannot attach to a device
-that never enumerated.
+If the devices are absent, fix the ACPI stage first. HID-BPF cannot attach to a
+device that did not enumerate.
 
-## Phantom KEY_MICMUTE came back
+## Phantom KEY_MICMUTE returned
 
 ```bash
 systemctl status honor-hid-bpf-reapply.service --no-pager -l
@@ -107,14 +207,14 @@ grep -l UNKNOWN /sys/class/input/input*/name | xargs -r grep -H 2808
 
 The second command should print nothing.
 
-## Touchpad left-edge brightness gesture does not work
+## Touchpad left-edge brightness gesture
 
 ```bash
 sudo udev-hid-bpf list-loaded
 ls -l /etc/udev-hid-bpf/
 ```
 
-Re-run only that upstream installer:
+If only this component needs repair:
 
 ```bash
 sudo env ALLOW_UNVERIFIED=1 \
@@ -136,90 +236,134 @@ sleep 1
 echo 2 | sudo tee /sys/class/leds/honor::kbd_backlight/brightness
 ```
 
-If a kernel update caused the service to fail, check matching headers:
+After a kernel update, if the service fails, verify matching headers and restart:
 
 ```bash
-uname -r
 test -e /usr/lib/modules/"$(uname -r)"/build/Makefile && echo headers-ok
-```
-
-Then:
-
-```bash
 sudo systemctl restart honor-zqcp-kbdlight.service
 ```
 
-## DSC
+## DSC is armed but not active
+
+Check root-side state:
 
 ```bash
-systemctl status honor-force-dsc.service --no-pager -l
-sudo journalctl -u honor-force-dsc.service -b --no-pager -n 100
 sudo cat /sys/kernel/debug/dri/*/eDP-*/i915_dsc_fec_support
 ```
 
-Healthy output contains:
+Healthy state contains:
 
 ```text
 DSC_Enabled: yes
 Force_DSC_Enable: yes
 ```
 
-Display depth:
+The root service only **arms** DSC. The post-login user service performs one
+Hyprland-owned DPMS cycle so a new modeset actually uses DSC.
+
+Check it as your normal desktop user:
 
 ```bash
-sudo grep -m1 -E 'pipe src=.*bpp=' \
-  /sys/kernel/debug/dri/*/i915_display_info
+systemctl --user status honor-dsc-modeset.service --no-pager -l
+journalctl --user -u honor-dsc-modeset.service -b --no-pager -n 100
 ```
 
-The intended state is `bpp=30` and `dither=no`.
-
-## Boot-time graphical artifacts
-
-First check whether the installed system is fully updated:
+Or use the sudo-safe one-command diagnostic:
 
 ```bash
-uname -r
-pacman -Q linux-omarchy linux-omarchy-bore 2>/dev/null || true
+sudo ./scripts/diagnose-dsc-session.sh
 ```
 
-The reviewed current Omarchy kernel is based on Linux 7.2.8, which already
-contains the stable Panther Lake CDCLK sanitization fix that the older HONOR
-repository carried as a custom `xe.ko` patch.
+The helper waits for Omarchy/UWSM's Wayland environment and can recover
+`HYPRLAND_INSTANCE_SIGNATURE` from the live runtime directory.
 
-Also check the current boot log:
+Hyprland may briefly return:
+
+```text
+status=7/NOTRUNNING
+```
+
+during the intentional DPMS transition. That return code alone is **not** a
+failure. The helper validates the actual monitor `dpmsStatus` afterward.
+
+## Display is `bpp=24, dither=no`
+
+That is accepted and expected on the **stock Omarchy kernel** for this setup:
+
+```text
+DSC active
+bpp=24 (8 bpc)
+dither=no
+```
+
+Do not install a custom kernel just to make the health check say 10 bpc. The
+repository intentionally prioritizes normal Omarchy kernel updates.
+
+## Display is still `bpp=18, dither=yes`
+
+That usually means DSC was armed but no new compositor modeset happened yet.
+
+Check:
 
 ```bash
-sudo journalctl -k -b --no-pager | \
-  grep -iE 'FIFO underrun|cdclk|xe.*ERROR|drm.*ERROR'
+systemctl --user status honor-dsc-modeset.service --no-pager -l
+sudo ./scripts/diagnose-dsc-session.sh
 ```
 
-Do not install a vanilla-built `xe.ko` on top of the Omarchy kernel just to
-chase an artifact.
+Then refresh the installed helper:
 
-## Fingerprint
+```bash
+sudo ./scripts/resume-runtime.sh
+```
 
-Check the USB reader:
+A brief one-second display blank during the DPMS cycle is expected.
+
+## Fingerprint build fails at Meson setup
+
+First ensure:
+
+```bash
+pacman -Q glib2-devel
+command -v glib-mkenums
+```
+
+Then rerun:
+
+```bash
+./setup.sh
+```
+
+The runtime installer is designed to be rerunnable.
+
+## Fingerprint driver is installed but authentication is not configured
+
+Check:
 
 ```bash
 lsusb -d 1c7a:05aa
-```
-
-Check the private library:
-
-```bash
 ldconfig -p | grep /opt/honor-libfprint-sdcp
-systemctl status fprintd --no-pager -l
-```
-
-Test:
-
-```bash
 fprintd-list "$USER"
-fprintd-verify
 ```
 
-If the driver works but Omarchy authentication is not configured:
+Then let Omarchy own the authentication policy:
 
 ```bash
 omarchy-setup-security-fingerprint
 ```
+
+## Diagnostic scripts
+
+DSC root/debugfs state:
+
+```bash
+sudo ./scripts/diagnose-dsc.sh
+```
+
+DSC user-session/UWSM/Hyprland state:
+
+```bash
+sudo ./scripts/diagnose-dsc-session.sh
+```
+
+Both scripts are committed executable; if Git reports otherwise, update the
+checkout before troubleshooting permissions manually.
